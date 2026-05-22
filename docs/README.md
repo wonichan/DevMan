@@ -22,6 +22,12 @@
 
 ---
 
+## 截图
+
+> TODO: 添加实际运行截图
+
+---
+
 ## 快速开始
 
 ### 环境要求
@@ -65,6 +71,19 @@ wails build -platform windows/amd64
 
 ---
 
+## 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 桌面框架 | Wails v2 (WebView2 + Go) |
+| 后端 | Go 1.25+ |
+| 前端 | React 18 + TypeScript |
+| 样式 | Tailwind CSS 4 |
+| 构建 | Vite 3 |
+| 数据库 | SQLite (mattn/go-sqlite3) |
+
+---
+
 ## 项目结构
 
 ```
@@ -75,9 +94,21 @@ DevMan/
 │   ├── FRONTEND.md         # 前端 UI/UX 设计
 │   └── API.md              # Go 后端 API 文档
 │
-├── frontend/                # React 前端 (详见 docs/FRONTEND.md)
-├── internal/                # Go 私有包 (详见 docs/ARCHITECTURE.md)
+├── frontend/                # React 前端
+│   ├── src/pages/          # 6 个页面 (Dashboard, Environments...)
+│   ├── src/components/     # 可复用组件 (Sidebar, Panel)
+│   └── wailsjs/            # Wails 自动生成的 Go 绑定
+│
+├── internal/                # Go 私有包
+│   ├── models/             # 数据模型
+│   ├── scanner/            # 环境扫描引擎
+│   ├── registry/           # SQLite 持久化
+│   ├── migrator/           # 环境迁移引擎
+│   └── utils/              # 工具函数
+│
 ├── build/                   # Wails 构建配置
+│   └── windows/            # Windows manifest & 图标
+│
 ├── app.go                   # Wails App 入口
 ├── main.go                  # 程序入口
 ├── go.mod                   # Go 模块
@@ -86,12 +117,35 @@ DevMan/
 
 ---
 
-## 文档
+## 详细文档
 
-- 📋 [开发计划 & 路线图](./docs/PLAN.md)
-- 🏗️ [系统架构设计](./docs/ARCHITECTURE.md)
-- 🎨 [前端 UI/UX 设计](./docs/FRONTEND.md)
-- 📡 [后端 API 文档](./docs/API.md)
+- [开发计划 & 路线图](./PLAN.md)
+- [系统架构设计](./ARCHITECTURE.md)
+- [前端 UI/UX 设计](./FRONTEND.md)
+- [后端 API 文档](./API.md)
+
+---
+
+## 开发指南
+
+### 新增环境扫描器
+
+1. 在 `internal/scanner/` 创建 `xxx.go`
+2. 实现 `Scanner` 接口：
+   ```go
+   type MyScanner struct{}
+   func (s *MyScanner) Name() string { return "MyLang" }
+   func (s *MyScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error) {
+       // 检测逻辑
+   }
+   ```
+3. 在 `scanner.go` 的 `NewEngine` 中注册
+
+### 新增前端页面
+
+1. 在 `frontend/src/pages/` 创建组件
+2. 在 `App.tsx` 的 `Page` 类型和渲染逻辑中添加路由
+3. 在 `Sidebar.tsx` 中添加导航项
 
 ---
 
@@ -103,6 +157,8 @@ DevMan/
 | v0.2.0 | 扫描增强（Docker、IDE）、Cleaner 升级、主题切换 |
 | v0.3.0 | 一键安装、代理配置、数据可视化 |
 | v1.0.0 | macOS/Linux 支持、AI 推荐、插件系统 |
+
+详见 [PLAN.md](./PLAN.md)
 
 ---
 
