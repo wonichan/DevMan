@@ -26,8 +26,16 @@ export function GetHistory(arg1) {
   return window['go']['main']['App']['GetHistory'](arg1);
 }
 
+export function GetSettings() {
+  return window['go']['main']['App']['GetSettings']();
+}
+
 export function Migrate(arg1, arg2, arg3) {
   return window['go']['main']['App']['Migrate'](arg1, arg2, arg3);
+}
+
+export function SaveSettings(arg1) {
+  return window['go']['main']['App']['SaveSettings'](arg1);
 }
 
 export function ScanAll() {

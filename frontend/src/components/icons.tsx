@@ -137,3 +137,16 @@ export const LoaderIcon = (props: IconProps) => (
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
   </IconWrapper>
 );
+
+export const PlusIcon = (props: IconProps) => (
+  <IconWrapper {...props}>
+    <path d="M12 5v14" />
+    <path d="M5 12h14" />
+  </IconWrapper>
+);
+
+export const CommandIcon = (props: IconProps) => (
+  <IconWrapper {...props}>
+    <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
+  </IconWrapper>
+);

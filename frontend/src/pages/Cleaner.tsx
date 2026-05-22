@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AnalyzeCleanable, CleanItems } from '../bindings/go/main/App';
+import { AnalyzeCleanable, CleanItems } from '../api/app';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
 import { Button } from '../components/ui/Button';
@@ -17,6 +17,24 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+function riskColor(level: string): string {
+  switch (level.toLowerCase()) {
+    case 'low': return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+    case 'medium': return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+    case 'high': return 'text-red-400 bg-red-500/10 border-red-500/20';
+    default: return 'text-slate-400 bg-slate-500/10 border-slate-500/20';
+  }
+}
+
+function riskLabel(level: string): string {
+  switch (level.toLowerCase()) {
+    case 'low': return '低风险';
+    case 'medium': return '中风险';
+    case 'high': return '高风险';
+    default: return level;
+  }
+}
+
 export default function Cleaner() {
   const [items, setItems] = useState<CleanableItem[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -29,10 +47,13 @@ export default function Cleaner() {
     setScanning(true);
     try {
       const data = await AnalyzeCleanable();
-      setItems(data || []);
-      toast.success('分析完成', `找到 ${data?.length || 0} 个可清理项`);
-    } catch (e) {
-      console.error(e);
+      const normalized = (data || []).map((item) => ({
+        ...item,
+        Selected: item.Category === 'cache' ? true : item.Selected,
+      }));
+      setItems(normalized);
+      toast.success('分析完成', `找到 ${normalized.length} 个可清理项`);
+    } catch (e: unknown) {
       toast.error('分析失败', e instanceof Error ? e.message : String(e));
     }
     setScanning(false);
@@ -69,8 +90,7 @@ export default function Cleaner() {
       const freed = await CleanItems(selected);
       toast.success('清理完成', `成功清理 ${selected.length} 项，释放 ${formatBytes(Number(freed))} 空间`);
       await analyze();
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
       toast.error('清理失败', e instanceof Error ? e.message : String(e));
     }
     setCleaning(false);
@@ -97,7 +117,6 @@ export default function Cleaner() {
         }
       />
 
-      {/* 汇总卡片 */}
       <SurfaceCard className="mb-6" variant="raised">
         <div className="flex items-center justify-between">
           <div>
@@ -122,7 +141,6 @@ export default function Cleaner() {
         )}
       </SurfaceCard>
 
-      {/* 列表 */}
       {items.length > 0 && (
         <div className="mb-4 pl-1">
           <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer hover:text-slate-200 transition-colors w-fit">
@@ -147,8 +165,14 @@ export default function Cleaner() {
               className="w-4 h-4 rounded border-[#475569] bg-[#0f172a] text-emerald-500 focus:ring-emerald-500/50 flex-shrink-0 cursor-pointer"
             />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-bold text-slate-200">{item.Name}</span>
+                <span className={`text-xs px-2 py-0.5 rounded border ${riskColor(item.RiskLevel)}`}>
+                  {riskLabel(item.RiskLevel)}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded bg-[#0f172a] border border-[#334155] text-slate-400">
+                  {item.Category}
+                </span>
               </div>
               <p className="text-xs text-slate-400 truncate mt-0.5 font-mono">{item.Path}</p>
               <p className="text-xs text-slate-500 mt-1">{item.Description}</p>

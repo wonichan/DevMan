@@ -66,4 +66,29 @@ export interface CleanableItem {
   SizeBytes: number;
   Selected: boolean;
   EnvKey: string;
+  Category: string;
+  RiskLevel: string;
+}
+
+export interface AppSettings {
+  AutoScanOnStartup: boolean;
+  ConfirmBeforeMigration: boolean;
+  Theme: 'dark' | 'system';
+  CustomScanPaths: string[];
+}
+
+export interface MigrationProgress {
+  Step: string;
+  StepIndex: number;
+  TotalSteps: number;
+  Percent: number;
+  Message: string;
+  EnvKey: string;
+}
+
+export interface MigrationResult {
+  success: boolean;
+  message: string;
+  bytesMoved?: number;
+  durationMs?: number;
 }

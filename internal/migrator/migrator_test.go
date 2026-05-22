@@ -108,6 +108,61 @@ func TestPreCheck(t *testing.T) {
 	}
 }
 
+func TestPreCheckRejectsTargetInsideSource(t *testing.T) {
+	engine, reg, cleanup := setupTestMigrator(t)
+	defer cleanup()
+
+	env := &models.Env{Name: "NestedTarget", Key: "nested-target", Category: models.CategoryRuntime}
+	reg.SaveEnv(env)
+	sourceDir := t.TempDir()
+	reg.SavePath(&models.EnvPath{
+		EnvID:     env.ID,
+		Type:      models.PathInstall,
+		Path:      sourceDir,
+		SizeBytes: 100,
+		IsMovable: true,
+	})
+
+	targetDir := filepath.Join(sourceDir, "child")
+	if err := engine.preCheck(env.ID, targetDir); err == nil {
+		t.Error("pre-check should reject target directory inside source")
+	}
+}
+
+func TestValidateMigrationPathsRejectsDangerousTargets(t *testing.T) {
+	sourceDir := t.TempDir()
+
+	if err := validateMigrationPaths(sourceDir, os.TempDir()); err == nil {
+		t.Error("validation should reject temp directory as target")
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		if err := validateMigrationPaths(sourceDir, home); err == nil {
+			t.Error("validation should reject home directory as target")
+		}
+	}
+	root := filepath.VolumeName(sourceDir) + string(os.PathSeparator)
+	if root == string(os.PathSeparator) || filepath.VolumeName(sourceDir) != "" {
+		if err := validateMigrationPaths(sourceDir, root); err == nil {
+			t.Error("validation should reject filesystem root as target")
+		}
+	}
+}
+
+func TestValidateMigrationPathsRejectsDangerousSources(t *testing.T) {
+	targetDir := filepath.Join(t.TempDir(), "target")
+
+	if err := validateMigrationPaths(os.TempDir(), targetDir); err == nil {
+		t.Error("validation should reject temp directory as source")
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		if err := validateMigrationPaths(home, targetDir); err == nil {
+			t.Error("validation should reject home directory as source")
+		}
+	}
+}
+
 func TestSnapshot(t *testing.T) {
 	engine, reg, cleanup := setupTestMigrator(t)
 	defer cleanup()

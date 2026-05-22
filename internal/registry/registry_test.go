@@ -173,3 +173,96 @@ func TestSnapshot(t *testing.T) {
 		t.Errorf("expected name 'test-snap', got %s", fetched.Name)
 	}
 }
+
+func TestGetSettingsDefault(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	settings, err := reg.GetSettings()
+	if err != nil {
+		t.Fatalf("get settings failed: %v", err)
+	}
+	if settings.AutoScanOnStartup {
+		t.Error("AutoScanOnStartup should default to false")
+	}
+	if !settings.ConfirmBeforeMigration {
+		t.Error("ConfirmBeforeMigration should default to true")
+	}
+	if settings.Theme != "dark" {
+		t.Errorf("Theme should default to 'dark', got %s", settings.Theme)
+	}
+	if len(settings.CustomScanPaths) != 0 {
+		t.Errorf("CustomScanPaths should default to empty, got %v", settings.CustomScanPaths)
+	}
+}
+
+func TestSaveAndGetSettings(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	settings := &models.AppSettings{
+		AutoScanOnStartup:      true,
+		ConfirmBeforeMigration: false,
+		Theme:                  "light",
+		CustomScanPaths:        []string{"/custom/path1", "/custom/path2"},
+	}
+	if err := reg.SaveSettings(settings); err != nil {
+		t.Fatalf("save settings failed: %v", err)
+	}
+
+	fetched, err := reg.GetSettings()
+	if err != nil {
+		t.Fatalf("get settings failed: %v", err)
+	}
+	if !fetched.AutoScanOnStartup {
+		t.Error("AutoScanOnStartup should be true")
+	}
+	if fetched.ConfirmBeforeMigration {
+		t.Error("ConfirmBeforeMigration should be false")
+	}
+	if fetched.Theme != "light" {
+		t.Errorf("Theme should be 'light', got %s", fetched.Theme)
+	}
+	if len(fetched.CustomScanPaths) != 2 {
+		t.Errorf("expected 2 custom scan paths, got %d", len(fetched.CustomScanPaths))
+	}
+	if fetched.CustomScanPaths[0] != "/custom/path1" {
+		t.Errorf("expected first path '/custom/path1', got %s", fetched.CustomScanPaths[0])
+	}
+}
+
+func TestSaveSettingsOverwrite(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	settings := &models.AppSettings{
+		AutoScanOnStartup:      true,
+		ConfirmBeforeMigration: true,
+		Theme:                  "dark",
+		CustomScanPaths:        []string{},
+	}
+	if err := reg.SaveSettings(settings); err != nil {
+		t.Fatalf("save settings failed: %v", err)
+	}
+
+	updated := &models.AppSettings{
+		AutoScanOnStartup:      false,
+		ConfirmBeforeMigration: false,
+		Theme:                  "dark",
+		CustomScanPaths:        []string{"/new/path"},
+	}
+	if err := reg.SaveSettings(updated); err != nil {
+		t.Fatalf("overwrite settings failed: %v", err)
+	}
+
+	fetched, err := reg.GetSettings()
+	if err != nil {
+		t.Fatalf("get settings failed: %v", err)
+	}
+	if fetched.AutoScanOnStartup {
+		t.Error("AutoScanOnStartup should be false after overwrite")
+	}
+	if len(fetched.CustomScanPaths) != 1 {
+		t.Errorf("expected 1 custom scan path after overwrite, got %d", len(fetched.CustomScanPaths))
+	}
+}

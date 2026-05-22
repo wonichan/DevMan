@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ScanAll, GetDiskInfo } from '../bindings/go/main/App';
+import { ScanAll, GetDiskInfo } from '../api/app';
 import type { EnvSummary, DiskInfo } from '../devman-types';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
@@ -33,14 +33,12 @@ export default function Dashboard() {
       setDisks(d || []);
       success('刷新成功', '环境数据已更新');
     } catch (e: unknown) {
-      console.error(e);
       error('加载失败', e instanceof Error ? e.message : String(e));
     }
     setLoading(false);
   };
 
   useEffect(() => {
-    // Initial load without toast to prevent spam
     const initLoad = async () => {
       setLoading(true);
       try {
@@ -48,8 +46,8 @@ export default function Dashboard() {
         setSummaries(s || []);
         const d = await GetDiskInfo();
         setDisks(d || []);
-      } catch (e) {
-        console.error(e);
+      } catch (e: unknown) {
+        error('加载失败', e instanceof Error ? e.message : String(e));
       }
       setLoading(false);
     };
@@ -69,99 +67,100 @@ export default function Dashboard() {
         title="Dashboard" 
         description="总览你的开发环境状态"
         actions={
-          <Button onClick={load} disabled={loading} isLoading={loading} className="flex items-center gap-2">
-            <RefreshIcon className="w-4 h-4" />
-            刷新环境数据
+          <Button onClick={load} disabled={loading} isLoading={loading}>
+            <RefreshIcon className="mr-2 h-4 w-4" />
+            刷新
           </Button>
         }
       />
 
-      {loading && summaries.length === 0 && disks.length === 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
-          <SurfaceCard className="p-6 h-32 animate-pulse" />
-          <SurfaceCard className="p-6 h-32 animate-pulse" />
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
-          {/* C盘健康 */}
-          <SurfaceCard className="p-6">
-            <div className="flex items-start justify-between mb-4">
-              <span className="text-sm text-slate-400 flex items-center gap-2">
-                <InfoIcon className="w-4 h-4" />
-                C盘健康状态
-              </span>
-              <StatusBadge status={diskStatus}>
-                {diskStatusLabel}
-              </StatusBadge>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+        <SurfaceCard variant="raised">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+              <CheckIcon className="w-5 h-5 text-emerald-400" />
             </div>
-            <div className="text-5xl font-bold text-slate-100 mb-2">{cUsedPercent}%</div>
-            <p className="text-sm text-slate-400">
-              {cDisk ? formatBytes(cDisk.TotalBytes - cDisk.FreeBytes) + ' / ' + formatBytes(cDisk.TotalBytes) : '--'}
-            </p>
-          </SurfaceCard>
+            <div>
+              <p className="text-xs text-slate-400">已检测环境</p>
+              <p className="text-2xl font-bold text-slate-100">{summaries.length}</p>
+            </div>
+          </div>
+        </SurfaceCard>
+        <SurfaceCard variant="raised">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20">
+              <InfoIcon className="w-5 h-5 text-cyan-400" />
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">环境总占用</p>
+              <p className="text-2xl font-bold text-slate-100">{formatBytes(totalEnvSize)}</p>
+            </div>
+          </div>
+        </SurfaceCard>
+        <SurfaceCard variant="raised">
+          <div className="flex items-center gap-3 mb-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
+              diskStatus === 'danger' ? 'bg-red-500/10 border-red-500/20' : 
+              diskStatus === 'warning' ? 'bg-amber-500/10 border-amber-500/20' : 
+              'bg-emerald-500/10 border-emerald-500/20'
+            }`}>
+              <WarningIcon className={`w-5 h-5 ${
+                diskStatus === 'danger' ? 'text-red-400' : 
+                diskStatus === 'warning' ? 'text-amber-400' : 
+                'text-emerald-400'
+              }`} />
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">C 盘状态</p>
+              <div className="flex items-center gap-2">
+                <p className="text-2xl font-bold text-slate-100">{cUsedPercent}%</p>
+                <StatusBadge status={diskStatus} label={diskStatusLabel} />
+              </div>
+            </div>
+          </div>
+          {cDisk && (
+            <ProgressBar value={cUsedPercent} variant={diskStatus === 'danger' ? 'danger' : diskStatus === 'warning' ? 'warning' : 'accent'} />
+          )}
+        </SurfaceCard>
+      </div>
 
-          {/* 已管理环境 */}
-          <SurfaceCard className="p-6">
-            <div className="flex items-start justify-between mb-4">
-              <span className="text-sm text-slate-400 flex items-center gap-2">
-                <DashboardIcon className="w-4 h-4" />
-                已管理环境
-              </span>
-              <StatusBadge status="healthy">
-                正常
-              </StatusBadge>
-            </div>
-            <div className="text-5xl font-bold text-emerald-400 mb-2">{summaries.length}</div>
-            <p className="text-sm text-slate-400">
-              总占用 {formatBytes(totalEnvSize)}
-            </p>
-          </SurfaceCard>
+      <h2 className="text-lg font-bold text-slate-200 mb-4">环境概览</h2>
+      {summaries.length === 0 ? (
+        <EmptyState 
+          icon={<DashboardIcon className="w-6 h-6" />}
+          title="暂无环境数据"
+          description="点击上方「刷新」按钮扫描系统环境"
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {summaries.map((summary) => (
+            <SurfaceCard key={summary.Env.Key} variant="interactive">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{summary.Env.Icon}</span>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-200">{summary.Env.Name}</h3>
+                    <p className="text-xs text-slate-400">{summary.Instances.length} 个版本</p>
+                  </div>
+                </div>
+                <StatusBadge status={summary.Health === 'healthy' ? 'healthy' : 'warning'} label={summary.Health === 'healthy' ? '正常' : '需关注'} />
+              </div>
+              <div className="space-y-2">
+                {summary.Instances.slice(0, 2).map(inst => (
+                  <div key={inst.Id} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-300 font-mono">{inst.Version}</span>
+                    <span className="text-slate-500 text-xs">{inst.InstallPath}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 pt-3 border-t border-[#334155] flex items-center justify-between">
+                <span className="text-xs text-slate-500">总大小</span>
+                <span className="text-sm font-bold text-cyan-400">{formatBytes(summary.TotalSize)}</span>
+              </div>
+            </SurfaceCard>
+          ))}
         </div>
       )}
-
-      {/* 空间占用排行 */}
-      <SurfaceCard className="p-6 mb-6">
-        <h3 className="text-sm text-slate-400 mb-4 flex items-center gap-2">
-          <InfoIcon className="w-4 h-4" />
-          环境空间占用排行
-        </h3>
-        
-        {loading && summaries.length === 0 ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="flex items-center gap-4 animate-pulse">
-                <div className="w-20 h-5 bg-slate-700 rounded" />
-                <div className="flex-1 h-3 bg-slate-700 rounded-full" />
-                <div className="w-20 h-5 bg-slate-700 rounded" />
-              </div>
-            ))}
-          </div>
-        ) : summaries.length > 0 ? (
-          <div className="space-y-4">
-            {[...summaries]
-              .sort((a, b) => (b.TotalSize || 0) - (a.TotalSize || 0))
-              .map((s) => {
-                const maxSize = Math.max(...summaries.map(x => x.TotalSize || 0), 1);
-                const pct = ((s.TotalSize || 0) / maxSize) * 100;
-                return (
-                  <div key={s.Env.Key} className="flex items-center gap-4">
-                    <span className="w-24 truncate text-sm text-slate-200 font-medium" title={s.Env.Name}>{s.Env.Name}</span>
-                    <div className="flex-1">
-                      <ProgressBar value={pct} variant="accent" />
-                    </div>
-                    <span className="w-20 text-right text-sm text-slate-400">{formatBytes(s.TotalSize || 0)}</span>
-                  </div>
-                );
-              })}
-          </div>
-        ) : (
-          <EmptyState 
-            icon={<DashboardIcon />}
-            title="暂无环境数据"
-            description="点击右上角的刷新按钮开始扫描"
-          />
-        )}
-      </SurfaceCard>
     </div>
   );
 }

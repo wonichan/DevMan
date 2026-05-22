@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { GetEnvs, GetEnvSummary, Migrate, GetDiskInfo } from '../bindings/go/main/App';
-import type { EnvSummary, DiskInfo } from '../devman-types';
+import { GetEnvs, GetEnvSummary, Migrate, GetDiskInfo, EventsOn } from '../api/app';
+import type { EnvSummary, DiskInfo, MigrationProgress, MigrationResult } from '../devman-types';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
@@ -26,13 +26,6 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-interface MigrationResult {
-  success: boolean;
-  message: string;
-  bytesMoved?: number;
-  durationMs?: number;
-}
-
 export default function Migration() {
   const [step, setStep] = useState(1);
   const [envs, setEnvs] = useState<EnvSummary[]>([]);
@@ -42,6 +35,7 @@ export default function Migration() {
   const [migrating, setMigrating] = useState(false);
   const [result, setResult] = useState<MigrationResult | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const [progress, setProgress] = useState<MigrationProgress | null>(null);
 
   const { success, error } = useToast();
   const { confirm } = useConfirm();
@@ -50,6 +44,25 @@ export default function Migration() {
     loadEnvs();
     loadDisks();
   }, []);
+
+  useEffect(() => {
+    const cancel = EventsOn('migration:progress', (data) => {
+      if (!isMigrationProgress(data)) return;
+      setProgress(data);
+      setLogs((prev) => [...prev, `${data.Step}: ${data.Message}`]);
+    });
+    return () => cancel();
+  }, []);
+
+  const isMigrationProgress = (value: unknown): value is MigrationProgress => {
+    if (!value || typeof value !== 'object') return false;
+    const progressValue = value as Record<string, unknown>;
+    return (
+      typeof progressValue.Step === 'string' &&
+      typeof progressValue.Message === 'string' &&
+      typeof progressValue.Percent === 'number'
+    );
+  };
 
   const loadEnvs = async () => {
     try {
@@ -60,8 +73,8 @@ export default function Migration() {
         if (s) summaries.push(s);
       }
       setEnvs(summaries);
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      error('加载环境失败', e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -69,8 +82,8 @@ export default function Migration() {
     try {
       const d = await GetDiskInfo();
       setDisks(d || []);
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      error('加载磁盘信息失败', e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -90,9 +103,10 @@ export default function Migration() {
     setStep(4);
     setMigrating(true);
     setLogs(['开始迁移...']);
+    setProgress(null);
     
     try {
-      const res = await Migrate(selectedEnv.Env.Id, targetDir, false) as MigrationResult;
+      const res = await Migrate(selectedEnv.Env.Id, targetDir, false);
       setResult(res);
       setLogs(prev => [...prev, res.message || '迁移完成']);
       
@@ -128,7 +142,6 @@ export default function Migration() {
         description="将开发环境安全迁移到其他磁盘，释放 C 盘空间"
       />
 
-      {/* 步骤指示器 */}
       <div className="flex items-center mb-8 bg-[#1e293b]/40 p-4 rounded-xl border border-[#334155]">
         {steps.map((s, idx) => (
           <div key={s.num} className="flex items-center">
@@ -157,7 +170,6 @@ export default function Migration() {
         ))}
       </div>
 
-      {/* Step 1: 选择环境 */}
       {step === 1 && (
         <div className="animate-in fade-in slide-in-from-right-4 duration-300">
           <h3 className="text-lg font-bold text-slate-200 mb-4">选择要迁移的环境</h3>
@@ -215,7 +227,6 @@ export default function Migration() {
         </div>
       )}
 
-      {/* Step 2: 选择目标 */}
       {step === 2 && selectedEnv && (
         <div className="animate-in fade-in slide-in-from-right-4 duration-300">
           <h3 className="text-lg font-bold text-slate-200 mb-4">选择目标位置</h3>
@@ -259,7 +270,6 @@ export default function Migration() {
             </SurfaceCard>
           </div>
 
-          {/* 磁盘预览 */}
           <SurfaceCard className="p-6 mb-8">
             <p className="text-sm text-slate-400 mb-5 flex items-center gap-2">
               <InfoIcon className="w-4 h-4" />
@@ -316,7 +326,6 @@ export default function Migration() {
         </div>
       )}
 
-      {/* Step 3: 预览确认 */}
       {step === 3 && selectedEnv && (
         <div className="animate-in fade-in slide-in-from-right-4 duration-300">
           <h3 className="text-lg font-bold text-slate-200 mb-4">确认迁移操作</h3>
@@ -380,7 +389,6 @@ export default function Migration() {
         </div>
       )}
 
-      {/* Step 4: 执行结果 */}
       {step === 4 && (
         <div className="animate-in fade-in zoom-in-95 duration-300">
           <h3 className="text-lg font-bold text-slate-200 mb-4">迁移结果</h3>
@@ -391,10 +399,18 @@ export default function Migration() {
                 <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin" />
               </div>
               <h4 className="text-lg font-bold text-slate-200 mb-2">正在执行环境迁移</h4>
-              <p className="text-sm text-slate-400 mb-6">这可能需要几分钟时间，请勿关闭程序...</p>
-              
+              <p className="text-sm text-slate-400 mb-2">这可能需要几分钟时间，请勿关闭程序...</p>
+              {progress && (
+                <div className="mb-4">
+                  <p className="text-sm text-emerald-400 font-medium">{progress.Step}</p>
+                  <p className="text-xs text-slate-500">{progress.Message}</p>
+                </div>
+              )}
               <div className="w-3/4 mx-auto max-w-md h-2 bg-[#0f172a] rounded-full overflow-hidden border border-[#334155]">
-                <div className="h-full bg-emerald-500 rounded-full animate-pulse w-3/4 shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+                <div 
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" 
+                  style={{ width: `${Math.min(100, Math.max(0, progress?.Percent || 0))}%` }} 
+                />
               </div>
             </SurfaceCard>
           )}
@@ -450,7 +466,7 @@ export default function Migration() {
           <div className="flex justify-between">
             <Button
               variant="secondary"
-              onClick={() => { setStep(1); setSelectedEnv(null); setResult(null); setLogs([]); }}
+              onClick={() => { setStep(1); setSelectedEnv(null); setResult(null); setLogs([]); setProgress(null); }}
             >
               返回重新选择
             </Button>
@@ -463,6 +479,7 @@ export default function Migration() {
                   setSelectedEnv(null); 
                   setResult(null); 
                   setLogs([]);
+                  setProgress(null);
                 }}
                 className="flex items-center gap-2"
               >

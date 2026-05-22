@@ -1,8 +1,7 @@
 import type { ComponentType } from 'react';
 import { DashboardIcon, EnvironmentsIcon, MigrationIcon, CleanerIcon, VersionsIcon, SettingsIcon, CheckIcon } from './icons';
 import type { IconProps } from './icons';
-
-type Page = 'dashboard' | 'environments' | 'migration' | 'cleaner' | 'versions' | 'settings';
+import type { Page } from '../App';
 
 interface Props {
   active: Page;

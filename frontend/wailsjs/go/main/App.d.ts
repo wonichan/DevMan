@@ -15,6 +15,10 @@ export function GetEnvs():Promise<Array<models.Env>>;
 
 export function GetHistory(arg1:number):Promise<Array<models.HistoryEntry>>;
 
+export function GetSettings():Promise<models.AppSettings>;
+
 export function Migrate(arg1:number,arg2:string,arg3:boolean):Promise<migrator.MigrationResult>;
+
+export function SaveSettings(arg1:models.AppSettings):Promise<void>;
 
 export function ScanAll():Promise<Array<models.EnvSummary>>;

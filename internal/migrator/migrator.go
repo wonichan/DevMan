@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -28,16 +29,40 @@ type MigrationResult struct {
 }
 
 func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*MigrationResult, error) {
+	return e.MigrateWithProgress(envID, targetDir, useJunction, nil)
+}
+
+func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction bool, progress func(models.MigrationProgress)) (*MigrationResult, error) {
 	start := time.Now()
 	result := &MigrationResult{Success: false}
+	steps := []string{"precheck", "snapshot", "paths", "staging", "copy", "verify", "envvars", "commit", "junction", "registry"}
+	emit := func(stepIndex int, step, message string) {
+		if progress == nil {
+			return
+		}
+		percent := 100
+		if stepIndex < len(steps) {
+			percent = stepIndex * 100 / len(steps)
+		}
+		progress(models.MigrationProgress{
+			Step:       step,
+			StepIndex:  stepIndex,
+			TotalSteps: len(steps),
+			Percent:    percent,
+			Message:    message,
+			EnvKey:     fmt.Sprintf("env_%d", envID),
+		})
+	}
 
 	// 1. Pre-check
+	emit(0, "precheck", "Checking prerequisites")
 	if err := e.preCheck(envID, targetDir); err != nil {
 		result.Message = err.Error()
 		return result, nil
 	}
 
 	// 2. Snapshot
+	emit(1, "snapshot", "Creating snapshot")
 	snap, err := e.createSnapshot(envID)
 	if err != nil {
 		result.Message = "创建快照失败: " + err.Error()
@@ -45,6 +70,7 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 	}
 
 	// 3. Get paths to migrate
+	emit(2, "paths", "Reading paths")
 	paths, err := e.reg.ListPaths(envID)
 	if err != nil {
 		result.Message = "读取路径失败"
@@ -64,6 +90,7 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 	}
 
 	// 4. Create staging dir
+	emit(3, "staging", "Creating staging directory")
 	baseName := filepath.Base(installPath)
 	stagingDir := filepath.Join(targetDir, ".devman_tmp", fmt.Sprintf("%s_%d", baseName, time.Now().Unix()))
 	if err := os.MkdirAll(stagingDir, 0755); err != nil {
@@ -72,6 +99,7 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 	}
 
 	// 5. Copy files
+	emit(4, "copy", "Copying files")
 	bytesMoved, err := e.copyDir(installPath, stagingDir)
 	if err != nil {
 		// Rollback: remove staging
@@ -81,6 +109,7 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 	}
 
 	// 6. Verify
+	emit(5, "verify", "Verifying copy")
 	if !e.verifyCopy(installPath, stagingDir) {
 		_ = os.RemoveAll(stagingDir)
 		result.Message = "验证失败，移除临时目录"
@@ -88,6 +117,7 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 	}
 
 	// 7. Update environment variables (platform specific)
+	emit(6, "envvars", "Updating environment variables")
 	finalDir := filepath.Join(targetDir, baseName)
 	if err := e.updateEnvVars(installPath, finalDir); err != nil {
 		_ = os.RemoveAll(stagingDir)
@@ -96,6 +126,7 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 	}
 
 	// 8. Commit: rename staging to final
+	emit(7, "commit", "Committing migration")
 	if err := os.Rename(stagingDir, finalDir); err != nil {
 		// Rollback env vars
 		_ = e.restoreSnapshot(snap)
@@ -105,6 +136,7 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 	}
 
 	// 9. Create junction if requested (Windows only)
+	emit(8, "junction", "Creating junction or removing source")
 	if useJunction && runtime.GOOS == "windows" {
 		_ = e.createJunction(installPath, finalDir)
 	} else {
@@ -113,6 +145,7 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 	}
 
 	// 10. Update registry
+	emit(9, "registry", "Updating registry")
 	for i := range paths {
 		if paths[i].Type == models.PathInstall {
 			paths[i].Path = finalDir
@@ -132,26 +165,134 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 		Success:     true,
 		CreatedAt:   time.Now(),
 	})
+	emit(len(steps), "complete", "Migration complete")
 
 	return result, nil
 }
 
 func (e *Engine) preCheck(envID int64, targetDir string) error {
-	// Check target dir exists or can be created
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("目标目录不可写: %w", err)
-	}
-	// Check target disk space (simplified)
 	paths, _ := e.reg.ListPaths(envID)
 	var totalSize int64
+	installPath := ""
 	for _, p := range paths {
 		totalSize += p.SizeBytes
+		if p.Type == models.PathInstall {
+			installPath = p.Path
+		}
+	}
+	if installPath == "" {
+		return fmt.Errorf("未找到安装路径")
+	}
+	if err := validateMigrationPaths(installPath, targetDir); err != nil {
+		return err
+	}
+	// Check target dir exists or can be created after validating path safety.
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("目标目录不可写: %w", err)
 	}
 	// TODO: check actual free space on target disk
 	if totalSize == 0 {
 		return fmt.Errorf("未能计算源目录大小")
 	}
 	return nil
+}
+
+func validateMigrationPaths(sourcePath, targetDir string) error {
+	sourceAbs, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return fmt.Errorf("源路径无效: %w", err)
+	}
+	targetAbs, err := filepath.Abs(targetDir)
+	if err != nil {
+		return fmt.Errorf("目标路径无效: %w", err)
+	}
+	sourceAbs = filepath.Clean(sourceAbs)
+	targetAbs = filepath.Clean(targetAbs)
+
+	info, err := os.Stat(sourceAbs)
+	if err != nil {
+		return fmt.Errorf("源路径不可访问: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("源路径不是目录")
+	}
+	if isDangerousMigrationSource(sourceAbs) {
+		return fmt.Errorf("拒绝迁移过宽的系统目录: %s", sourceAbs)
+	}
+	if isDangerousMigrationTarget(targetAbs) {
+		return fmt.Errorf("拒绝使用过宽的目标目录: %s", targetAbs)
+	}
+	if samePath(sourceAbs, targetAbs) || isPathInside(targetAbs, sourceAbs) {
+		return fmt.Errorf("目标目录不能位于源目录内部")
+	}
+	return nil
+}
+
+func isDangerousMigrationSource(path string) bool {
+	clean := filepath.Clean(path)
+	if filepath.Dir(clean) == clean {
+		return true
+	}
+	volume := filepath.VolumeName(clean)
+	if volume != "" && samePath(clean, volume+string(os.PathSeparator)) {
+		return true
+	}
+	for _, base := range []string{userHomeDir(), os.TempDir()} {
+		if base != "" && samePath(clean, base) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDangerousMigrationTarget(path string) bool {
+	clean := filepath.Clean(path)
+	if filepath.Dir(clean) == clean {
+		return true
+	}
+	volume := filepath.VolumeName(clean)
+	if volume != "" && samePath(clean, volume+string(os.PathSeparator)) {
+		return true
+	}
+	for _, base := range []string{userHomeDir(), os.TempDir()} {
+		if base != "" && samePath(clean, base) {
+			return true
+		}
+	}
+	return false
+}
+
+func userHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Clean(home)
+}
+
+func samePath(a, b string) bool {
+	return comparablePath(a) == comparablePath(b)
+}
+
+func isPathInside(path, parent string) bool {
+	cleanPath := comparablePath(path)
+	cleanParent := comparablePath(parent)
+	if strings.HasPrefix(cleanPath, cleanParent+string(os.PathSeparator)) {
+		return true
+	}
+	rel, err := filepath.Rel(parent, path)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+}
+
+func comparablePath(path string) string {
+	clean := filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(clean)
+	}
+	return clean
 }
 
 func (e *Engine) createSnapshot(envID int64) (*models.Snapshot, error) {
@@ -161,8 +302,8 @@ func (e *Engine) createSnapshot(envID int64) (*models.Snapshot, error) {
 	}
 	b, _ := json.Marshal(data)
 	snap := &models.Snapshot{
-		Name:     fmt.Sprintf("pre-migrate-%d-%d", envID, time.Now().Unix()),
-		DataJSON: string(b),
+		Name:      fmt.Sprintf("pre-migrate-%d-%d", envID, time.Now().Unix()),
+		DataJSON:  string(b),
 		CreatedAt: time.Now(),
 	}
 	if err := e.reg.SaveSnapshot(snap); err != nil {

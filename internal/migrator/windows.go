@@ -35,7 +35,7 @@ func updateWindowsPath(oldPath, newPath string) error {
 
 func broadcastEnvChange() error {
 	hwnd := uintptr(0xffff) // HWND_BROADCAST
-	msg := uintptr(0x1A)   // WM_SETTINGCHANGE
+	msg := uintptr(0x1A)    // WM_SETTINGCHANGE
 	// Use SendNotifyMessageW
 	user32 := syscall.NewLazyDLL("user32.dll")
 	proc := user32.NewProc("SendNotifyMessageW")

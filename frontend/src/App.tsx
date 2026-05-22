@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
+import GlobalSearch from './components/GlobalSearch';
 import Dashboard from './pages/Dashboard';
 import Environments from './pages/Environments';
 import Migration from './pages/Migration';
@@ -8,11 +9,22 @@ import Versions from './pages/Versions';
 import Settings from './pages/Settings';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { ConfirmProvider } from './components/ui/ConfirmDialog';
+import { GetSettings } from './api/app';
 
-type Page = 'dashboard' | 'environments' | 'migration' | 'cleaner' | 'versions' | 'settings';
+export type Page = 'dashboard' | 'environments' | 'migration' | 'cleaner' | 'versions' | 'settings';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+
+  useEffect(() => {
+    GetSettings()
+      .then((s) => {
+        document.documentElement.dataset.theme = s.Theme;
+      })
+      .catch(() => {
+        document.documentElement.dataset.theme = 'dark';
+      });
+  }, []);
 
   return (
     <ToastProvider>
@@ -21,6 +33,9 @@ function App() {
           <Sidebar active={currentPage} onNavigate={setCurrentPage} />
           <main className="flex-1 overflow-y-auto">
             <div className="max-w-5xl mx-auto p-8 pb-24">
+              <div className="flex justify-end mb-4">
+                <GlobalSearch onNavigate={setCurrentPage} />
+              </div>
               {currentPage === 'dashboard' && <Dashboard />}
               {currentPage === 'environments' && <Environments />}
               {currentPage === 'migration' && <Migration />}

@@ -5,3 +5,4 @@ frontend/dist
 .superpowers/*
 .omo/
 .playwright-mcp/
+.sisyphus/

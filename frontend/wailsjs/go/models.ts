@@ -23,6 +23,24 @@ export namespace migrator {
 
 export namespace models {
 	
+	export class AppSettings {
+	    AutoScanOnStartup: boolean;
+	    ConfirmBeforeMigration: boolean;
+	    Theme: string;
+	    CustomScanPaths: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AppSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.AutoScanOnStartup = source["AutoScanOnStartup"];
+	        this.ConfirmBeforeMigration = source["ConfirmBeforeMigration"];
+	        this.Theme = source["Theme"];
+	        this.CustomScanPaths = source["CustomScanPaths"];
+	    }
+	}
 	export class CleanableItem {
 	    Name: string;
 	    Path: string;
@@ -30,6 +48,8 @@ export namespace models {
 	    SizeBytes: number;
 	    Selected: boolean;
 	    EnvKey: string;
+	    Category: string;
+	    RiskLevel: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CleanableItem(source);
@@ -43,6 +63,8 @@ export namespace models {
 	        this.SizeBytes = source["SizeBytes"];
 	        this.Selected = source["Selected"];
 	        this.EnvKey = source["EnvKey"];
+	        this.Category = source["Category"];
+	        this.RiskLevel = source["RiskLevel"];
 	    }
 	}
 	export class DiskInfo {

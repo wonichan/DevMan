@@ -25,10 +25,10 @@ const (
 type HealthLevel string
 
 const (
-	HealthHealthy   HealthLevel = "healthy"
-	HealthInfo      HealthLevel = "info"
-	HealthWarning   HealthLevel = "warning"
-	HealthCritical  HealthLevel = "critical"
+	HealthHealthy  HealthLevel = "healthy"
+	HealthInfo     HealthLevel = "info"
+	HealthWarning  HealthLevel = "warning"
+	HealthCritical HealthLevel = "critical"
 )
 
 type Env struct {
@@ -56,22 +56,22 @@ type EnvInstance struct {
 }
 
 type EnvPath struct {
-	ID        int64     `json:"Id"`
-	EnvID     int64     `json:"EnvId"`
-	InstanceID *int64   `json:"InstanceId,omitempty"`
-	Type      PathType  `json:"Type"`
-	Path      string    `json:"Path"`
-	SizeBytes int64     `json:"SizeBytes"`
-	IsMovable bool      `json:"IsMovable"`
-	LastSized time.Time `json:"LastSized"`
+	ID         int64     `json:"Id"`
+	EnvID      int64     `json:"EnvId"`
+	InstanceID *int64    `json:"InstanceId,omitempty"`
+	Type       PathType  `json:"Type"`
+	Path       string    `json:"Path"`
+	SizeBytes  int64     `json:"SizeBytes"`
+	IsMovable  bool      `json:"IsMovable"`
+	LastSized  time.Time `json:"LastSized"`
 }
 
 type EnvSummary struct {
-	Env       Env         `json:"Env"`
+	Env       Env           `json:"Env"`
 	Instances []EnvInstance `json:"Instances"`
-	Paths     []EnvPath   `json:"Paths"`
-	TotalSize int64       `json:"TotalSize"`
-	Health    HealthLevel `json:"Health"`
+	Paths     []EnvPath     `json:"Paths"`
+	TotalSize int64         `json:"TotalSize"`
+	Health    HealthLevel   `json:"Health"`
 }
 
 type DiskInfo struct {
@@ -83,17 +83,17 @@ type DiskInfo struct {
 }
 
 type MigrationTask struct {
-	ID             int64     `json:"Id"`
-	Name           string    `json:"Name"`
-	Status         string    `json:"Status"`
-	SourcePaths    []string  `json:"SourcePaths"`
-	TargetDir      string    `json:"TargetDir"`
-	UseJunction    bool      `json:"UseJunction"`
-	CreateSnapshot bool      `json:"CreateSnapshot"`
-	SnapshotID     *int64    `json:"SnapshotId,omitempty"`
+	ID             int64      `json:"Id"`
+	Name           string     `json:"Name"`
+	Status         string     `json:"Status"`
+	SourcePaths    []string   `json:"SourcePaths"`
+	TargetDir      string     `json:"TargetDir"`
+	UseJunction    bool       `json:"UseJunction"`
+	CreateSnapshot bool       `json:"CreateSnapshot"`
+	SnapshotID     *int64     `json:"SnapshotId,omitempty"`
 	StartedAt      *time.Time `json:"StartedAt,omitempty"`
 	CompletedAt    *time.Time `json:"CompletedAt,omitempty"`
-	ErrorMsg       string    `json:"ErrorMsg"`
+	ErrorMsg       string     `json:"ErrorMsg"`
 }
 
 type Snapshot struct {
@@ -104,13 +104,13 @@ type Snapshot struct {
 }
 
 type HistoryEntry struct {
-	ID          int64     `json:"Id"`
-	Action      string    `json:"Action"`
-	TargetEnv   string    `json:"TargetEnv"`
-	DetailsJSON string    `json:"DetailsJson"`
-	Success     bool      `json:"Success"`
-	ErrorMessage string   `json:"ErrorMessage"`
-	CreatedAt   time.Time `json:"CreatedAt"`
+	ID           int64     `json:"Id"`
+	Action       string    `json:"Action"`
+	TargetEnv    string    `json:"TargetEnv"`
+	DetailsJSON  string    `json:"DetailsJson"`
+	Success      bool      `json:"Success"`
+	ErrorMessage string    `json:"ErrorMessage"`
+	CreatedAt    time.Time `json:"CreatedAt"`
 }
 
 type CleanableItem struct {
@@ -120,4 +120,22 @@ type CleanableItem struct {
 	SizeBytes   int64  `json:"SizeBytes"`
 	Selected    bool   `json:"Selected"`
 	EnvKey      string `json:"EnvKey"`
+	Category    string `json:"Category"`
+	RiskLevel   string `json:"RiskLevel"`
+}
+
+type AppSettings struct {
+	AutoScanOnStartup      bool     `json:"AutoScanOnStartup"`
+	ConfirmBeforeMigration bool     `json:"ConfirmBeforeMigration"`
+	Theme                  string   `json:"Theme"`
+	CustomScanPaths        []string `json:"CustomScanPaths"`
+}
+
+type MigrationProgress struct {
+	Step       string `json:"Step"`
+	StepIndex  int    `json:"StepIndex"`
+	TotalSteps int    `json:"TotalSteps"`
+	Percent    int    `json:"Percent"`
+	Message    string `json:"Message"`
+	EnvKey     string `json:"EnvKey"`
 }

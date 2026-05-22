@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react';
-import { GetEnvs, GetEnvSummary } from '../bindings/go/main/App';
+import { GetEnvs, GetEnvSummary } from '../api/app';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { SearchIcon } from '../components/icons';
+import { useToast } from '../hooks/useToast';
 import type { EnvSummary } from '../devman-types';
 
 export default function Versions() {
   const [envs, setEnvs] = useState<EnvSummary[]>([]);
-
-  useEffect(() => {
-    loadData();
-  }, []);
+  const [loading, setLoading] = useState(false);
+  const { error } = useToast();
 
   const loadData = async () => {
+    setLoading(true);
     try {
       const list = await GetEnvs();
       const summaries: EnvSummary[] = [];
@@ -23,10 +23,15 @@ export default function Versions() {
         if (s) summaries.push(s);
       }
       setEnvs(summaries);
-    } catch (e) {
-      console.error(e);
+    } catch (e: unknown) {
+      error('加载失败', e instanceof Error ? e.message : String(e));
     }
+    setLoading(false);
   };
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   return (
     <div>
@@ -68,20 +73,20 @@ export default function Versions() {
                 </div>
               ))}
               {env.Instances.length === 0 && (
-                <p className="text-sm text-slate-400 text-center py-4">未检测到安装版本</p>
+                <p className="text-sm text-slate-500 px-4 py-3">未检测到已安装版本</p>
               )}
             </div>
           </SurfaceCard>
         ))}
-
-        {envs.length === 0 && (
-          <EmptyState 
-            icon={<SearchIcon className="w-6 h-6" />}
-            title="暂无环境数据"
-            description="请先前往「总览」页面点击「刷新环境数据」"
-          />
-        )}
       </div>
+
+      {envs.length === 0 && !loading && (
+        <EmptyState 
+          icon={<SearchIcon className="w-6 h-6" />}
+          title="暂无版本数据"
+          description="请先扫描环境或刷新页面"
+        />
+      )}
     </div>
   );
 }

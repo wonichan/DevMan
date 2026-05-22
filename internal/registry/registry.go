@@ -115,6 +115,12 @@ CREATE TABLE IF NOT EXISTS history (
 CREATE INDEX IF NOT EXISTS idx_envs_key ON envs(key);
 CREATE INDEX IF NOT EXISTS idx_instances_env ON env_instances(env_id);
 CREATE INDEX IF NOT EXISTS idx_paths_env ON env_paths(env_id);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 `
 	_, err := r.db.Exec(schema)
 	return err
@@ -353,6 +359,43 @@ func joinPlaceholders(p []string) string {
 		result += ", " + p[i]
 	}
 	return result
+}
+
+// Export/Import for snapshots
+func (r *Registry) GetSettings() (*models.AppSettings, error) {
+	row := r.db.QueryRow(`SELECT value_json FROM settings WHERE key = 'app'`)
+	var jsonStr string
+	err := row.Scan(&jsonStr)
+	if err == sql.ErrNoRows {
+		// Return defaults
+		return &models.AppSettings{
+			AutoScanOnStartup:      false,
+			ConfirmBeforeMigration: true,
+			Theme:                  "dark",
+			CustomScanPaths:        []string{},
+		}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var s models.AppSettings
+	if err := json.Unmarshal([]byte(jsonStr), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func (r *Registry) SaveSettings(s *models.AppSettings) error {
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Exec(
+		`INSERT INTO settings (key, value_json, updated_at) VALUES ('app', ?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`,
+		string(data), time.Now(),
+	)
+	return err
 }
 
 // Export/Import for snapshots
