@@ -203,12 +203,10 @@ func (r *Registry) ListInstances(envID int64) ([]models.EnvInstance, error) {
 	var list []models.EnvInstance
 	for rows.Next() {
 		var i models.EnvInstance
-		var id, eid, def, act int
+		var def, act int
 		if err := rows.Scan(&i.ID, &i.EnvID, &i.Version, &i.InstallPath, &def, &act, &i.Source, &i.DetectedAt); err != nil {
 			return nil, err
 		}
-		_ = id
-		_ = eid
 		i.IsDefault = def != 0
 		i.IsActive = act != 0
 		list = append(list, i)
@@ -399,9 +397,9 @@ func (r *Registry) ExportSnapshotData() (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"envs":      envs,
-		"instances": instList,
-		"paths":     pathList,
+		"envs":       envs,
+		"instances":  instList,
+		"paths":      pathList,
 		"exportedAt": time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }

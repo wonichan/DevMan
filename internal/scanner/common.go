@@ -1,11 +1,14 @@
 package scanner
 
 import (
+	"context"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // DirSize recursively calculates total size of a directory in bytes
@@ -94,6 +97,23 @@ func FindExecutableInPath(name string) string {
 		}
 	}
 	return ""
+}
+
+func ExecutableVersion(exe string, args ...string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, exe, args...).CombinedOutput()
+	if err != nil {
+		return "unknown"
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return "unknown"
 }
 
 // CommonWindowsPaths returns standard installation paths on Windows

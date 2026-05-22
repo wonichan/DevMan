@@ -1,7 +1,7 @@
 # DevMan 开发进度总览
 
-> 文档更新时间：2025-05-22
-> 当前版本：v0.1.0 MVP
+> 文档更新时间：2026-05-23
+> 当前版本：v0.1.1 紧急修复版
 
 ---
 
@@ -33,8 +33,8 @@
 | 模块 | 完成度 | 说明 |
 |------|--------|------|
 | `internal/models` | 100% | 所有数据结构完整（Env / Instance / Path / Summary / Disk / Migration / Snapshot / History / Cleanable） |
-| `internal/registry` | ~95% | 6 张表 + CRUD + 快照导出/导入 + 历史记录 + `ON CONFLICT` 更新 |
-| `internal/scanner` | ~90% | Engine + 6 个扫描器（Node.js / Python / Java / Go / Flutter / Rust），但版本号检测是占位符 |
+| `internal/registry` | ~96% | 6 张表 + CRUD + 快照导出/导入 + 历史记录 + `ON CONFLICT` 更新，已清理 `ListInstances` 未使用变量 |
+| `internal/scanner` | ~95% | Engine + 6 个扫描器（Node.js / Python / Java / Go / Flutter / Rust），已执行真实版本号检测 |
 | `internal/migrator` | ~85% | A→B→C staging 模式 + 快照回滚 + 文件校验 + Windows Junction + PATH 更新 |
 | `internal/utils` | ~90% | 磁盘信息查询（Windows WMI / Linux statfs） |
 | `app.go` | ~90% | 所有暴露给前端的方法已定义（ScanAll / GetEnvs / Migrate / GetDiskInfo / CleanItems 等） |
@@ -45,21 +45,22 @@
 
 | 优先级 | 问题 | 影响范围 | 复现/说明 |
 |--------|------|----------|----------|
-| **P0** | Windows 构建 `wailsbindings.exe: %1 is not a valid Win32 application` | **无法本地构建** | 可能是 `GOOS` 环境变量被污染为 `linux`，或临时可执行文件格式错误 |
-| **P1** | 版本号全是 `"detected"` 占位符 | Dashboard / Environments 显示不准确 | `NodeScanner.readVersion()` 等未真正执行 `node --version` / `python --version` |
-| **P1** | `ListInstances` 中有未使用变量 (`id`, `eid`) | 代码质量 | 编译产生 warning，不影响功能 |
-| **P2** | 前端错误处理薄弱 | 用户体验 | 大量 `console.error`，缺少用户可见的 Toast / 弹窗提示 |
+| **已修复** | Windows 构建 `wailsbindings.exe: %1 is not a valid Win32 application` | 构建系统 | 已确认 `GOOS=windows` / `GOARCH=amd64` 正常；全局 Wails CLI 已匹配项目依赖 `v2.12.0`，`wails build` 可产出 `build/bin/devman.exe` |
+| **已修复** | 版本号全是 `"detected"` 占位符 | Dashboard / Environments | 扫描器已执行 `node --version` / `python --version` / `java -version` 等真实版本命令，并设置 3 秒超时 |
+| **已修复** | `ListInstances` 中有未使用变量 (`id`, `eid`) | 代码质量 | 已移除未使用变量，`gopls` 无诊断错误 |
+| **P2** | 前端错误处理薄弱 | 用户体验 | 部分页面仍有 `console.error`，未全部接入 Toast 用户反馈 |
 | **P2** | Settings 页面配置持久化未验证 | 设置功能 | 需确认是否真正写入了 registry SQLite |
-| **P2** | Migration 预览步骤可能未调用真实数据 | 迁移向导 | 需确认 `GetEnvSummary` 是否在前端正确调用并显示 |
+| **已核实** | Migration 预览步骤真实数据来源 | 迁移向导 | `Migration.tsx` 已调用 `GetEnvSummary` 汇总环境详情 |
 
 ---
 
 ## 三、待开发功能
 
 ### v0.1.1 — 紧急修复
-- [ ] **修复 Windows 构建 Bug** — `wailsbindings.exe` 32-bit 错误（P0）
-- [ ] **真实版本号检测** — `node --version` / `python --version` / `java -version` 等命令执行并解析
-- [ ] **消除编译 warning** — 清理未使用变量
+- [x] **修复 Windows 构建 Bug** — `wailsbindings.exe` 32-bit 错误（P0）
+- [x] **真实版本号检测** — `node --version` / `python --version` / `java -version` 等命令执行并解析
+- [x] **消除编译 warning** — 清理未使用变量
+- [x] **修复 Windows 原生测试路径** — registry / migrator 测试改用 `t.TempDir()`，不再依赖 `/tmp`
 
 ### v0.2.0 — 近期增强
 - [ ] **主题切换** — 深色 / 浅色 / 跟随系统（当前仅深色）
@@ -93,33 +94,33 @@
 |------|--------|------|
 | 项目骨架 | **100%** | 完整可用 |
 | 前端 UI | **~70%** | 页面全有，交互和反馈待完善 |
-| Go 后端 | **~80%** | 核心逻辑都在，版本检测和边界条件待加强 |
-| 测试覆盖 | **~60%** | 有测试文件，但覆盖率未知 |
-| **Windows 构建** | **0%** | P0 Bug 阻塞，无法产出可执行文件 |
+| Go 后端 | **~85%** | 核心逻辑都在，版本检测已落地，边界条件仍可加强 |
+| 测试覆盖 | **~60%** | 有测试文件，`go test ./...` 已在 Windows 环境通过 |
+| **Windows 构建** | **100%** | `wails build` 已通过，可产出 `build/bin/devman.exe` |
 | 文档 | **100%** | PLAN / ARCHITECTURE / FRONTEND / API / STATUS 齐全 |
 
 ### 总体评估
-**v0.1.0 MVP 功能骨架已完成约 85%，但有一个致命的 Windows 构建阻塞 Bug 未解决。**
+**v0.1.1 紧急修复已完成，Windows 构建阻塞已解除，项目可进入正常本地测试与迭代开发循环。**
 
-修复该 Bug 后，项目即可进入正常的本地测试 → 迭代开发循环。
+验证结果：`go test ./...`、`npm run build`、`wails build` 均已通过。
 
 ---
 
 ## 五、下一步优先级建议
 
 ### 立即做（今天）
-1. **修复 Windows 构建** — 检查 `GOOS` 环境变量，清理临时文件，重新编译
-2. 验证修复后 `wails build` 和 `wails dev` 都能正常运行
+1. **前端错误处理** — 添加全局 Toast 组件，替换剩余 `console.error`
+2. **Settings 持久化验证** — 确保配置变更真正写入 SQLite
 
 ### 本周做
-3. **真实版本号检测** — 所有扫描器执行 `--version` 并解析输出
-4. **前端错误处理** — 添加全局 Toast 组件，替换 `console.error`
-5. **Settings 持久化验证** — 确保配置变更真正写入 SQLite
+3. 验证 `wails dev` 热重载流程
+4. **Cleaner 深度扫描** — 识别大型缓存目录
+5. **新增扫描器** — Docker / pnpm / yarn
 
 ### 下周做
 6. **主题切换** — 浅色模式 + 系统跟随
-7. **Cleaner 深度扫描** — 识别大型缓存目录
-8. **新增扫描器** — Docker / pnpm / yarn
+7. **全局搜索** — 顶部搜索框，快速跳转到环境或功能页面
+8. **迁移进度实时显示** — 大文件复制时的进度条回调接口
 
 ---
 

@@ -2,14 +2,13 @@ package registry
 
 import (
 	"devman/internal/models"
-	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
 func setupTestDB(t *testing.T) (*Registry, func()) {
-	dbPath := "/tmp/test_devman_registry_" + t.Name() + ".db"
-	_ = os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "devman.db")
 	DbPathOverride = dbPath
 
 	reg, err := Open()
@@ -19,7 +18,6 @@ func setupTestDB(t *testing.T) (*Registry, func()) {
 
 	cleanup := func() {
 		reg.Close()
-		os.Remove(dbPath)
 		DbPathOverride = ""
 	}
 	return reg, cleanup

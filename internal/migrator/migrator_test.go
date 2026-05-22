@@ -9,8 +9,7 @@ import (
 )
 
 func setupTestMigrator(t *testing.T) (*Engine, *registry.Registry, func()) {
-	dbPath := "/tmp/test_devman_migrator_" + t.Name() + ".db"
-	_ = os.Remove(dbPath)
+	dbPath := filepath.Join(t.TempDir(), "devman.db")
 	registry.DbPathOverride = dbPath
 
 	reg, err := registry.Open()
@@ -21,7 +20,6 @@ func setupTestMigrator(t *testing.T) (*Engine, *registry.Registry, func()) {
 	engine := New(reg)
 	cleanup := func() {
 		reg.Close()
-		os.Remove(dbPath)
 		registry.DbPathOverride = ""
 	}
 	return engine, reg, cleanup

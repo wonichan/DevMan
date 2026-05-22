@@ -68,9 +68,7 @@ func (s *NodeScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error) {
 }
 
 func (s *NodeScanner) readVersion(exe string) string {
-	// In real implementation, run `node --version` and parse output
-	// For now return placeholder
-	return "detected"
+	return ExecutableVersion(exe, "--version")
 }
 
 func (s *NodeScanner) detectYarnCache() string {
@@ -113,7 +111,7 @@ func (s *PythonScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error)
 				installDir = filepath.Dir(installDir)
 			}
 			instances = append(instances, models.EnvInstance{
-				Version:     "detected",
+				Version:     ExecutableVersion(exe, "--version"),
 				InstallPath: installDir,
 				IsDefault:   name == "python",
 				IsActive:    true,
@@ -172,7 +170,7 @@ func (s *JavaScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error) {
 			installDir = filepath.Dir(installDir)
 		}
 		instances = append(instances, models.EnvInstance{
-			Version:     "detected",
+			Version:     ExecutableVersion(exe, "-version"),
 			InstallPath: installDir,
 			IsDefault:   true,
 			IsActive:    true,
@@ -232,7 +230,7 @@ func (s *GoScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error) {
 			installDir = filepath.Dir(installDir)
 		}
 		instances = append(instances, models.EnvInstance{
-			Version:     "detected",
+			Version:     ExecutableVersion(exe, "version"),
 			InstallPath: installDir,
 			IsDefault:   true,
 			IsActive:    true,
@@ -270,7 +268,7 @@ func (s *FlutterScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error
 			installDir = filepath.Dir(installDir)
 		}
 		instances = append(instances, models.EnvInstance{
-			Version:     "detected",
+			Version:     ExecutableVersion(exe, "--version"),
 			InstallPath: installDir,
 			IsDefault:   true,
 			IsActive:    true,
@@ -283,7 +281,7 @@ func (s *FlutterScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error
 			c := filepath.Join(base, "flutter")
 			if IsDir(c) {
 				instances = append(instances, models.EnvInstance{
-					Version:     "detected",
+					Version:     filepath.Base(c),
 					InstallPath: c,
 					IsDefault:   true,
 					IsActive:    false,
@@ -321,7 +319,7 @@ func (s *RustScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error) {
 			installDir = filepath.Dir(installDir)
 		}
 		instances = append(instances, models.EnvInstance{
-			Version:     "detected",
+			Version:     ExecutableVersion(exe, "--version"),
 			InstallPath: installDir,
 			IsDefault:   true,
 			IsActive:    true,
