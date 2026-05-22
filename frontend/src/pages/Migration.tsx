@@ -1,7 +1,22 @@
 import { useEffect, useState } from 'react';
 import { GetEnvs, GetEnvSummary, Migrate, GetDiskInfo } from '../bindings/go/main/App';
-import Panel from '../components/Panel';
 import type { EnvSummary, DiskInfo } from '../devman-types';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Button } from '../components/ui/Button';
+import { SurfaceCard } from '../components/ui/SurfaceCard';
+import { ProgressBar } from '../components/ui/ProgressBar';
+import { useToast } from '../hooks/useToast';
+import { useConfirm } from '../hooks/useConfirm';
+import { 
+  CheckIcon, 
+  CloseIcon, 
+  RefreshIcon, 
+  WarningIcon, 
+  InfoIcon, 
+  ArrowRightIcon, 
+  ArrowLeftIcon,
+  MigrationIcon
+} from '../components/icons';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -11,6 +26,13 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+interface MigrationResult {
+  success: boolean;
+  message: string;
+  bytesMoved?: number;
+  durationMs?: number;
+}
+
 export default function Migration() {
   const [step, setStep] = useState(1);
   const [envs, setEnvs] = useState<EnvSummary[]>([]);
@@ -18,8 +40,11 @@ export default function Migration() {
   const [targetDir, setTargetDir] = useState('D:\\Dev');
   const [disks, setDisks] = useState<DiskInfo[]>([]);
   const [migrating, setMigrating] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<MigrationResult | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+
+  const { success, error } = useToast();
+  const { confirm } = useConfirm();
 
   useEffect(() => {
     loadEnvs();
@@ -49,17 +74,39 @@ export default function Migration() {
     }
   };
 
-  const handleMigrate = async () => {
+  const startMigration = async () => {
     if (!selectedEnv) return;
+    
+    const isConfirmed = await confirm({
+      title: '确认执行迁移',
+      description: `即将迁移 ${selectedEnv.Env.Name} 到 ${targetDir}。此操作会移动文件并更新环境变量。`,
+      confirmText: '立即迁移',
+      cancelText: '取消',
+      variant: 'danger'
+    });
+
+    if (!isConfirmed) return;
+
+    setStep(4);
     setMigrating(true);
     setLogs(['开始迁移...']);
+    
     try {
-      const res = await Migrate(selectedEnv.Env.Id, targetDir, false);
+      const res = await Migrate(selectedEnv.Env.Id, targetDir, false) as MigrationResult;
       setResult(res);
-      setLogs(prev => [...prev, res.Message || '迁移完成']);
-    } catch (e: any) {
-      setLogs(prev => [...prev, '错误: ' + (e.message || String(e))]);
+      setLogs(prev => [...prev, res.message || '迁移完成']);
+      
+      if (res.success) {
+        success('迁移成功', res.message);
+      } else {
+        error('迁移失败', res.message);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setLogs(prev => [...prev, '错误: ' + msg]);
+      error('迁移错误', msg);
     }
+    
     setMigrating(false);
   };
 
@@ -75,30 +122,36 @@ export default function Migration() {
   ];
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-devman-text-primary">📦 迁移向导</h1>
-        <p className="text-sm text-devman-text-muted mt-1">将开发环境安全迁移到其他磁盘，释放 C 盘空间</p>
-      </div>
+    <div className="animate-in fade-in duration-300">
+      <PageHeader 
+        title="迁移向导" 
+        description="将开发环境安全迁移到其他磁盘，释放 C 盘空间"
+      />
 
       {/* 步骤指示器 */}
-      <div className="flex items-center mb-8">
+      <div className="flex items-center mb-8 bg-[#1e293b]/40 p-4 rounded-xl border border-[#334155]">
         {steps.map((s, idx) => (
           <div key={s.num} className="flex items-center">
             <div className={`
-              w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold
-              ${step >= s.num
-                ? 'bg-devman-accent/20 text-devman-accent border border-devman-accent/40'
-                : 'bg-devman-panel-raised text-devman-text-muted border border-devman-border'
+              w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors
+              ${step > s.num
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                : step === s.num
+                  ? 'bg-emerald-600 text-white shadow-[0_0_10px_rgba(16,185,129,0.3)]'
+                  : 'bg-[#0f172a] text-slate-500 border border-[#334155]'
               }
             `}>
-              {step > s.num ? '✓' : s.num}
+              {step > s.num ? <CheckIcon className="w-4 h-4" /> : s.num}
             </div>
-            <span className={`ml-2 text-sm font-medium ${step >= s.num ? 'text-devman-text-primary' : 'text-devman-text-muted'}`}>
+            <span className={`ml-3 text-sm font-medium ${
+              step >= s.num ? 'text-slate-200' : 'text-slate-500'
+            }`}>
               {s.label}
             </span>
             {idx < steps.length - 1 && (
-              <div className={`w-16 h-0.5 mx-3 ${step > s.num ? 'bg-devman-accent/40' : 'bg-devman-border'}`} />
+              <div className={`w-12 h-[2px] mx-4 transition-colors ${
+                step > s.num ? 'bg-emerald-500/40' : 'bg-[#334155]'
+              }`} />
             )}
           </div>
         ))}
@@ -106,264 +159,316 @@ export default function Migration() {
 
       {/* Step 1: 选择环境 */}
       {step === 1 && (
-        <div>
-          <h3 className="text-lg font-bold text-devman-text-primary mb-4">选择要迁移的环境</h3>
+        <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+          <h3 className="text-lg font-bold text-slate-200 mb-4">选择要迁移的环境</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {envs.map((env) => (
-              <Panel
+              <SurfaceCard
                 key={env.Env.Key}
-                className={`p-5 cursor-pointer transition-all ${
-                  selectedEnv?.Env.Key === env.Env.Key
-                    ? 'border-devman-accent/50 bg-devman-accent/5'
-                    : 'hover:border-devman-border-strong'
-                }`}
+                variant={selectedEnv?.Env.Key === env.Env.Key ? 'selected' : 'interactive'}
+                className="p-5"
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelectedEnv(env)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setSelectedEnv(env);
+                  }
+                }}
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{env.Env.Icon}</span>
-                  <div className="flex-1">
-                    <h4 className="font-bold text-devman-text-primary">{env.Env.Name}</h4>
-                    <p className="text-xs text-devman-text-muted">
+                <div className="flex items-center gap-4">
+                  <span className="text-3xl opacity-80">{env.Env.Icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-bold text-slate-100 truncate">{env.Env.Name}</h4>
+                    <p className="text-xs text-slate-400 truncate mt-1">
                       {env.Instances[0]?.InstallPath || '未知路径'}
                     </p>
                   </div>
-                  <span className="text-sm font-mono text-devman-info">{formatBytes(env.TotalSize)}</span>
+                  <span className="text-sm font-mono text-cyan-400 bg-cyan-400/10 px-2 py-1 rounded-md">
+                    {formatBytes(env.TotalSize)}
+                  </span>
                 </div>
-              </Panel>
+              </SurfaceCard>
             ))}
           </div>
+          
           {envs.length === 0 && (
-            <div className="text-center py-12 text-devman-text-muted">
-              <p className="text-lg mb-2">🔍 暂无环境数据</p>
-              <p className="text-sm">请先前往「总览」页面点击「刷新环境数据」</p>
-            </div>
+            <SurfaceCard className="text-center py-12 flex flex-col items-center">
+              <MigrationIcon className="w-12 h-12 text-slate-500 mb-4 opacity-50" />
+              <p className="text-lg font-medium text-slate-300 mb-2">暂无环境数据</p>
+              <p className="text-sm text-slate-400">请先前往「总览」页面扫描环境数据</p>
+            </SurfaceCard>
           )}
-          <div className="mt-6 flex justify-end">
-            <button
+          
+          <div className="mt-8 flex justify-end">
+            <Button
+              variant="primary"
               disabled={!selectedEnv}
               onClick={() => setStep(2)}
-              className="px-6 py-2.5 bg-devman-accent/15 text-devman-accent rounded-xl text-sm font-bold hover:bg-devman-accent/25 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-2"
             >
-              下一步 →
-            </button>
+              下一步
+              <ArrowRightIcon className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       )}
 
       {/* Step 2: 选择目标 */}
       {step === 2 && selectedEnv && (
-        <div>
-          <h3 className="text-lg font-bold text-devman-text-primary mb-4">选择目标位置</h3>
+        <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+          <h3 className="text-lg font-bold text-slate-200 mb-4">选择目标位置</h3>
+          
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
-            <Panel className="p-5">
-              <p className="text-sm text-devman-text-muted mb-2">已选环境</p>
-              <div className="flex items-center gap-3 mb-3">
-                <span className="text-2xl">{selectedEnv.Env.Icon}</span>
-                <div>
-                  <h4 className="font-bold text-devman-text-primary">{selectedEnv.Env.Name}</h4>
-                  <p className="text-xs text-devman-text-muted">{selectedEnv.Instances[0]?.InstallPath}</p>
+            <SurfaceCard className="p-6">
+              <p className="text-sm text-slate-400 mb-4 flex items-center gap-2">
+                <InfoIcon className="w-4 h-4" />
+                已选环境
+              </p>
+              <div className="flex items-center gap-4 mb-4 bg-[#0f172a] p-4 rounded-xl border border-[#334155]">
+                <span className="text-3xl">{selectedEnv.Env.Icon}</span>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-slate-100 truncate">{selectedEnv.Env.Name}</h4>
+                  <p className="text-xs text-slate-400 truncate mt-1">{selectedEnv.Instances[0]?.InstallPath}</p>
                 </div>
               </div>
-              <p className="text-2xl font-bold text-devman-info">{formatBytes(selectedEnv.TotalSize)}</p>
-            </Panel>
+              <div className="flex items-end gap-2">
+                <p className="text-3xl font-bold text-cyan-400">{formatBytes(selectedEnv.TotalSize)}</p>
+                <span className="text-sm text-slate-500 mb-1">待迁移</span>
+              </div>
+            </SurfaceCard>
 
-            <Panel className="p-5">
-              <p className="text-sm text-devman-text-muted mb-2">目标位置</p>
+            <SurfaceCard className="p-6">
+              <p className="text-sm text-slate-400 mb-4 flex items-center gap-2">
+                <MigrationIcon className="w-4 h-4" />
+                目标位置
+              </p>
               <input
                 type="text"
                 value={targetDir}
                 onChange={(e) => setTargetDir(e.target.value)}
-                className="w-full px-4 py-2.5 bg-devman-panel-raised border border-devman-border rounded-xl text-sm text-devman-text-primary focus:outline-none focus:border-devman-accent/50 mb-3"
+                className="w-full px-4 py-3 bg-[#0f172a] border border-[#334155] rounded-xl text-sm text-slate-200 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 mb-4 transition-all"
               />
-              <p className="text-xs text-devman-text-muted">
-                最终路径: {targetDir}\\{selectedEnv.Env.Name.toLowerCase().replace(/\./g, '')}
-              </p>
-            </Panel>
+              <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg flex items-start gap-2">
+                <InfoIcon className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-emerald-300/80 leading-relaxed">
+                  最终路径: <span className="text-emerald-300 font-mono bg-emerald-500/20 px-1 rounded">{targetDir}\\{selectedEnv.Env.Name.toLowerCase().replace(/\./g, '')}</span>
+                </p>
+              </div>
+            </SurfaceCard>
           </div>
 
           {/* 磁盘预览 */}
-          <Panel className="p-5 mb-6">
-            <p className="text-sm text-devman-text-muted mb-4">磁盘空间预览</p>
-            <div className="space-y-3">
+          <SurfaceCard className="p-6 mb-8">
+            <p className="text-sm text-slate-400 mb-5 flex items-center gap-2">
+              <InfoIcon className="w-4 h-4" />
+              磁盘空间预览
+            </p>
+            <div className="space-y-6">
               {cDisk && (
                 <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-devman-text-primary">C 盘</span>
-                    <span className="text-devman-text-muted">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="text-slate-200 font-medium">C 盘 (源)</span>
+                    <span className="text-slate-400">
                       {Math.round(((cDisk.TotalBytes - cDisk.FreeBytes) / cDisk.TotalBytes) * 100)}% 已用
                     </span>
                   </div>
-                  <div className="h-3 bg-devman-panel-raised rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-yellow-500/60"
-                      style={{ width: `${((cDisk.TotalBytes - cDisk.FreeBytes) / cDisk.TotalBytes) * 100}%` }}
-                    />
-                  </div>
+                  <ProgressBar 
+                    value={((cDisk.TotalBytes - cDisk.FreeBytes) / cDisk.TotalBytes) * 100} 
+                    variant="warning" 
+                  />
                 </div>
               )}
               {tDisk && (
                 <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-devman-text-primary">{targetDisk} 盘</span>
-                    <span className="text-devman-text-muted">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="text-slate-200 font-medium">{targetDisk} 盘 (目标)</span>
+                    <span className="text-slate-400">
                       {Math.round(((tDisk.TotalBytes - tDisk.FreeBytes) / tDisk.TotalBytes) * 100)}% 已用
                     </span>
                   </div>
-                  <div className="h-3 bg-devman-panel-raised rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-green-500/60"
-                      style={{ width: `${((tDisk.TotalBytes - tDisk.FreeBytes) / tDisk.TotalBytes) * 100}%` }}
-                    />
-                  </div>
+                  <ProgressBar 
+                    value={((tDisk.TotalBytes - tDisk.FreeBytes) / tDisk.TotalBytes) * 100} 
+                    variant="accent" 
+                  />
                 </div>
               )}
             </div>
             {selectedEnv && cDisk && (
-              <p className="text-xs text-devman-text-muted mt-3">
-                迁移后 C 盘将释放 {formatBytes(selectedEnv.TotalSize)} 空间
-              </p>
+              <div className="mt-5 pt-4 border-t border-[#334155] flex items-center gap-2 text-sm text-slate-400">
+                <CheckIcon className="w-4 h-4 text-emerald-400" />
+                迁移后 C 盘将释放 <strong className="text-emerald-400">{formatBytes(selectedEnv.TotalSize)}</strong> 空间
+              </div>
             )}
-          </Panel>
+          </SurfaceCard>
 
           <div className="flex justify-between">
-            <button
-              onClick={() => setStep(1)}
-              className="px-6 py-2.5 bg-devman-panel-raised border border-devman-border rounded-xl text-sm text-devman-text-primary hover:bg-devman-border/20 transition-colors"
-            >
-              ← 上一步
-            </button>
-            <button
-              onClick={() => setStep(3)}
-              className="px-6 py-2.5 bg-devman-accent/15 text-devman-accent rounded-xl text-sm font-bold hover:bg-devman-accent/25 transition-colors"
-            >
-              下一步 →
-            </button>
+            <Button variant="secondary" onClick={() => setStep(1)} className="flex items-center gap-2">
+              <ArrowLeftIcon className="w-4 h-4" />
+              上一步
+            </Button>
+            <Button variant="primary" onClick={() => setStep(3)} className="flex items-center gap-2">
+              下一步
+              <ArrowRightIcon className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       )}
 
       {/* Step 3: 预览确认 */}
       {step === 3 && selectedEnv && (
-        <div>
-          <h3 className="text-lg font-bold text-devman-text-primary mb-4">确认迁移操作</h3>
-          <Panel className="p-5 mb-6">
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between py-2 border-b border-devman-border/30">
-                <span className="text-devman-text-muted">环境</span>
-                <span className="text-devman-text-primary font-medium">{selectedEnv.Env.Name} {selectedEnv.Instances[0]?.Version}</span>
+        <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+          <h3 className="text-lg font-bold text-slate-200 mb-4">确认迁移操作</h3>
+          
+          <SurfaceCard className="p-0 overflow-hidden mb-6 border-[#334155]">
+            <div className="grid grid-cols-3 divide-x divide-[#334155] bg-[#0f172a]">
+              <div className="p-4 flex flex-col items-center justify-center text-center">
+                <span className="text-xs text-slate-500 uppercase tracking-wider mb-1">环境</span>
+                <span className="text-sm font-bold text-slate-200">{selectedEnv.Env.Name} {selectedEnv.Instances[0]?.Version}</span>
               </div>
-              <div className="flex justify-between py-2 border-b border-devman-border/30">
-                <span className="text-devman-text-muted">源路径</span>
-                <span className="text-devman-text-primary font-medium">{selectedEnv.Instances[0]?.InstallPath}</span>
+              <div className="p-4 flex flex-col items-center justify-center text-center">
+                <span className="text-xs text-slate-500 uppercase tracking-wider mb-1">迁移大小</span>
+                <span className="text-sm font-bold text-cyan-400">{formatBytes(selectedEnv.TotalSize)}</span>
               </div>
-              <div className="flex justify-between py-2 border-b border-devman-border/30">
-                <span className="text-devman-text-muted">目标路径</span>
-                <span className="text-devman-text-primary font-medium">{targetDir}\\{selectedEnv.Env.Name.toLowerCase().replace(/\./g, '')}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b border-devman-border/30">
-                <span className="text-devman-text-muted">迁移大小</span>
-                <span className="text-devman-info font-bold">{formatBytes(selectedEnv.TotalSize)}</span>
-              </div>
-              <div className="flex justify-between py-2">
-                <span className="text-devman-text-muted">策略</span>
-                <span className="text-devman-text-primary font-medium">复制 → 验证 → 提交 → 删除源</span>
+              <div className="p-4 flex flex-col items-center justify-center text-center">
+                <span className="text-xs text-slate-500 uppercase tracking-wider mb-1">策略</span>
+                <span className="text-sm font-bold text-emerald-400">验证 → 提交</span>
               </div>
             </div>
-          </Panel>
+            
+            <div className="p-6 space-y-4">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-slate-500 uppercase tracking-wider">源路径</span>
+                <span className="text-sm text-slate-200 font-mono bg-[#0f172a] p-2 rounded border border-[#334155]">{selectedEnv.Instances[0]?.InstallPath}</span>
+              </div>
+              
+              <div className="flex justify-center text-slate-500 py-1">
+                <ArrowRightIcon className="w-5 h-5 rotate-90" />
+              </div>
+              
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-slate-500 uppercase tracking-wider">目标路径</span>
+                <span className="text-sm text-emerald-300 font-mono bg-emerald-500/10 p-2 rounded border border-emerald-500/20">{targetDir}\\{selectedEnv.Env.Name.toLowerCase().replace(/\./g, '')}</span>
+              </div>
+            </div>
+          </SurfaceCard>
 
-          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 mb-6">
-            <p className="text-sm text-yellow-400">
-              ⚠️ 迁移前会自动创建配置快照。如果迁移失败，可以通过快照恢复原始状态。
-              迁移过程中请勿关闭程序。
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 mb-8 flex gap-3 items-start">
+            <WarningIcon className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-300/90 leading-relaxed">
+              <strong>不可中断操作：</strong> 迁移前会自动创建配置快照。如果迁移失败，可以通过快照恢复原始状态。
+              迁移过程中请勿关闭程序或切断电源。
             </p>
           </div>
 
           <div className="flex justify-between">
-            <button
-              onClick={() => setStep(2)}
-              className="px-6 py-2.5 bg-devman-panel-raised border border-devman-border rounded-xl text-sm text-devman-text-primary hover:bg-devman-border/20 transition-colors"
-            >
-              ← 上一步
-            </button>
-            <button
-              onClick={() => { setStep(4); handleMigrate(); }}
+            <Button variant="secondary" onClick={() => setStep(2)} className="flex items-center gap-2">
+              <ArrowLeftIcon className="w-4 h-4" />
+              上一步
+            </Button>
+            <Button 
+              variant="primary" 
+              onClick={startMigration} 
               disabled={migrating}
-              className="px-6 py-2.5 bg-devman-accent/15 text-devman-accent rounded-xl text-sm font-bold hover:bg-devman-accent/25 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-2 px-8"
             >
-              {migrating ? '迁移中...' : '确认迁移'}
-            </button>
+              确认并开始迁移
+              <CheckIcon className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       )}
 
       {/* Step 4: 执行结果 */}
       {step === 4 && (
-        <div>
-          <h3 className="text-lg font-bold text-devman-text-primary mb-4">迁移结果</h3>
+        <div className="animate-in fade-in zoom-in-95 duration-300">
+          <h3 className="text-lg font-bold text-slate-200 mb-4">迁移结果</h3>
 
           {migrating && (
-            <Panel className="p-5 mb-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-5 h-5 border-2 border-devman-accent border-t-transparent rounded-full animate-spin" />
-                <span className="text-devman-text-primary">正在迁移...</span>
+            <SurfaceCard className="p-8 mb-6 text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/10 mb-4">
+                <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin" />
               </div>
-              <div className="h-2 bg-devman-panel-raised rounded-full overflow-hidden">
-                <div className="h-full bg-devman-accent rounded-full animate-pulse w-3/4" />
+              <h4 className="text-lg font-bold text-slate-200 mb-2">正在执行环境迁移</h4>
+              <p className="text-sm text-slate-400 mb-6">这可能需要几分钟时间，请勿关闭程序...</p>
+              
+              <div className="w-3/4 mx-auto max-w-md h-2 bg-[#0f172a] rounded-full overflow-hidden border border-[#334155]">
+                <div className="h-full bg-emerald-500 rounded-full animate-pulse w-3/4 shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
               </div>
-            </Panel>
+            </SurfaceCard>
           )}
 
           {!migrating && result && (
-            <Panel className={`p-5 mb-6 ${result.Success ? 'border-green-500/30' : 'border-red-500/30'}`}>
-              <div className="flex items-center gap-3 mb-3">
-                <span className={`text-2xl ${result.Success ? 'text-green-400' : 'text-red-400'}`}>
-                  {result.Success ? '✅' : '❌'}
-                </span>
-                <h4 className={`text-lg font-bold ${result.Success ? 'text-green-400' : 'text-red-400'}`}>
-                  {result.Success ? '迁移成功' : '迁移失败'}
-                </h4>
-              </div>
-              <p className="text-sm text-devman-text-primary mb-2">{result.Message}</p>
-              {result.Success && (
-                <div className="flex gap-6 text-sm mt-3">
-                  <div>
-                    <span className="text-devman-text-muted">移动大小: </span>
-                    <span className="text-devman-info font-bold">{formatBytes(result.BytesMoved || 0)}</span>
-                  </div>
-                  <div>
-                    <span className="text-devman-text-muted">耗时: </span>
-                    <span className="text-devman-text-primary font-medium">{(result.DurationMs || 0) / 1000}s</span>
-                  </div>
+            <SurfaceCard className={`p-6 mb-6 border ${result.success ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-red-500/50 bg-red-500/5'}`}>
+              <div className="flex items-start gap-4">
+                <div className={`p-3 rounded-full ${result.success ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                  {result.success ? <CheckIcon className="w-6 h-6" /> : <CloseIcon className="w-6 h-6" />}
                 </div>
-              )}
-            </Panel>
+                <div>
+                  <h4 className={`text-lg font-bold mb-1 ${result.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {result.success ? '迁移成功' : '迁移失败'}
+                  </h4>
+                  <p className="text-sm text-slate-300 mb-4">{result.message}</p>
+                  
+                  {result.success && (
+                    <div className="flex flex-wrap gap-4 text-sm bg-[#0f172a]/50 p-3 rounded-lg border border-[#334155]/50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">移动大小:</span>
+                        <span className="text-cyan-400 font-bold">{formatBytes(result.bytesMoved || 0)}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">耗时:</span>
+                        <span className="text-slate-200 font-medium">{(result.durationMs || 0) / 1000}s</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </SurfaceCard>
           )}
 
           {logs.length > 0 && (
-            <Panel className="p-4 mb-6 bg-devman-bg-deep">
-              <p className="text-xs text-devman-text-muted mb-2">操作日志</p>
-              <div className="space-y-1 font-mono text-xs">
+            <SurfaceCard className="p-0 mb-8 overflow-hidden border-[#334155]">
+              <div className="bg-[#0f172a] px-4 py-2 border-b border-[#334155] flex items-center gap-2">
+                <InfoIcon className="w-4 h-4 text-slate-400" />
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">执行日志</span>
+              </div>
+              <div className="p-4 bg-[#1e293b]/50 max-h-60 overflow-y-auto font-mono text-xs space-y-1.5">
                 {logs.map((log, i) => (
-                  <p key={i} className="text-devman-text-muted">{log}</p>
+                  <div key={i} className="flex gap-3 text-slate-300">
+                    <span className="text-slate-500 select-none">[{String(i + 1).padStart(2, '0')}]</span>
+                    <span className={log.includes('错误') ? 'text-red-400' : log.includes('成功') || log.includes('完成') ? 'text-emerald-400' : ''}>
+                      {log}
+                    </span>
+                  </div>
                 ))}
               </div>
-            </Panel>
+            </SurfaceCard>
           )}
 
           <div className="flex justify-between">
-            <button
+            <Button
+              variant="secondary"
               onClick={() => { setStep(1); setSelectedEnv(null); setResult(null); setLogs([]); }}
-              className="px-6 py-2.5 bg-devman-panel-raised border border-devman-border rounded-xl text-sm text-devman-text-primary hover:bg-devman-border/20 transition-colors"
             >
-              返回首页
-            </button>
-            {!migrating && result?.Success && (
-              <button
-                onClick={() => loadEnvs()}
-                className="px-6 py-2.5 bg-devman-accent/15 text-devman-accent rounded-xl text-sm font-bold hover:bg-devman-accent/25 transition-colors"
+              返回重新选择
+            </Button>
+            {!migrating && result?.success && (
+              <Button
+                variant="primary"
+                onClick={() => {
+                  loadEnvs();
+                  setStep(1); 
+                  setSelectedEnv(null); 
+                  setResult(null); 
+                  setLogs([]);
+                }}
+                className="flex items-center gap-2"
               >
-                🔄 刷新环境列表
-              </button>
+                <RefreshIcon className="w-4 h-4" />
+                完成并刷新
+              </Button>
             )}
           </div>
         </div>

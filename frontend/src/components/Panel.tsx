@@ -1,4 +1,5 @@
 import { ReactNode, MouseEventHandler } from 'react';
+import { SurfaceCard } from './ui/SurfaceCard';
 
 interface Props {
   children: ReactNode;
@@ -8,15 +9,12 @@ interface Props {
 
 export default function Panel({ children, className = '', onClick }: Props) {
   return (
-    <div
+    <SurfaceCard
       onClick={onClick}
-      className={`
-        bg-devman-panel border border-devman-border/30 rounded-[22px]
-        shadow-lg shadow-black/10
-        ${className}
-      `}
+      variant={onClick ? 'interactive' : 'default'}
+      className={className}
     >
       {children}
-    </div>
+    </SurfaceCard>
   );
 }

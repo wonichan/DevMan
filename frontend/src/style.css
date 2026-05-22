@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 @layer base {
   html, body, #app {
@@ -31,3 +29,22 @@
     background: #4a6fa5;
   }
 }
+
+@layer utilities {
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  .app-atmosphere {
+    background: radial-gradient(circle at top center, #0f172a 0%, #020617 100%);
+    color: #f8fafc;
+  }
+}
+
