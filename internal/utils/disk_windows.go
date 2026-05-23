@@ -6,17 +6,20 @@ import (
 	"devman/internal/models"
 	"syscall"
 	"unsafe"
+
+	"github.com/sirupsen/logrus"
 )
 
 var (
-	kernel32         = syscall.NewLazyDLL("kernel32.dll")
-	procGetLogicalDrives = kernel32.NewProc("GetLogicalDrives")
+	kernel32                = syscall.NewLazyDLL("kernel32.dll")
+	procGetLogicalDrives    = kernel32.NewProc("GetLogicalDrives")
 	procGetDiskFreeSpaceExW = kernel32.NewProc("GetDiskFreeSpaceExW")
 )
 
 func getWindowsDiskInfo() ([]models.DiskInfo, error) {
 	drives, err := getLogicalDrives()
 	if err != nil {
+		logrus.WithError(err).Error("failed to enumerate logical drives")
 		return nil, err
 	}
 
@@ -30,6 +33,7 @@ func getWindowsDiskInfo() ([]models.DiskInfo, error) {
 			uintptr(unsafe.Pointer(&totalFreeBytes)),
 		)
 		if ret == 0 {
+			logrus.WithField("drive", drive).Warn("failed to read disk free space")
 			continue
 		}
 
@@ -47,6 +51,7 @@ func getWindowsDiskInfo() ([]models.DiskInfo, error) {
 			UsedPercent: int(percent),
 		})
 	}
+	logrus.WithFields(logrus.Fields{"drive_count": len(drives), "disk_count": len(result)}).Info("logical drives scanned")
 	return result, nil
 }
 

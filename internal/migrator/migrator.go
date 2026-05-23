@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Engine struct {
@@ -34,9 +36,11 @@ func (e *Engine) Migrate(envID int64, targetDir string, useJunction bool) (*Migr
 
 func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction bool, progress func(models.MigrationProgress)) (*MigrationResult, error) {
 	start := time.Now()
+	logrus.WithFields(logrus.Fields{"env_id": envID, "target_dir": targetDir, "use_junction": useJunction}).Info("migration pipeline started")
 	result := &MigrationResult{Success: false}
-	steps := []string{"precheck", "snapshot", "paths", "staging", "copy", "verify", "envvars", "commit", "junction", "registry"}
+	steps := []string{"precheck", "snapshot", "paths", "staging", "copy", "verify", "commit", "envvars", "junction", "registry"}
 	emit := func(stepIndex int, step, message string) {
+		logrus.WithFields(logrus.Fields{"env_id": envID, "step": step, "step_index": stepIndex, "message": message}).Info("migration step")
 		if progress == nil {
 			return
 		}
@@ -58,6 +62,7 @@ func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction 
 	emit(0, "precheck", "Checking prerequisites")
 	if err := e.preCheck(envID, targetDir); err != nil {
 		result.Message = err.Error()
+		logrus.WithError(err).WithField("env_id", envID).Warn("migration precheck failed")
 		return result, nil
 	}
 
@@ -66,6 +71,7 @@ func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction 
 	snap, err := e.createSnapshot(envID)
 	if err != nil {
 		result.Message = "创建快照失败: " + err.Error()
+		logrus.WithError(err).WithField("env_id", envID).Error("migration snapshot failed")
 		return result, nil
 	}
 
@@ -74,6 +80,7 @@ func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction 
 	paths, err := e.reg.ListPaths(envID)
 	if err != nil {
 		result.Message = "读取路径失败"
+		logrus.WithError(err).WithField("env_id", envID).Error("migration failed to read paths")
 		return result, nil
 	}
 
@@ -86,8 +93,10 @@ func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction 
 	}
 	if installPath == "" {
 		result.Message = "未找到安装路径"
+		logrus.WithField("env_id", envID).Warn("migration install path not found")
 		return result, nil
 	}
+	logrus.WithFields(logrus.Fields{"env_id": envID, "install_path": installPath, "path_count": len(paths)}).Info("migration paths loaded")
 
 	// 4. Create staging dir
 	emit(3, "staging", "Creating staging directory")
@@ -95,8 +104,10 @@ func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction 
 	stagingDir := filepath.Join(targetDir, ".devman_tmp", fmt.Sprintf("%s_%d", baseName, time.Now().Unix()))
 	if err := os.MkdirAll(stagingDir, 0755); err != nil {
 		result.Message = "创建临时目录失败: " + err.Error()
+		logrus.WithError(err).WithField("staging_dir", stagingDir).Error("migration failed to create staging directory")
 		return result, nil
 	}
+	logrus.WithField("staging_dir", stagingDir).Info("migration staging directory created")
 
 	// 5. Copy files
 	emit(4, "copy", "Copying files")
@@ -105,43 +116,74 @@ func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction 
 		// Rollback: remove staging
 		_ = os.RemoveAll(stagingDir)
 		result.Message = "复制失败: " + err.Error()
+		logrus.WithError(err).WithFields(logrus.Fields{"source": installPath, "staging_dir": stagingDir}).Error("migration copy failed")
 		return result, nil
 	}
+	logrus.WithFields(logrus.Fields{"source": installPath, "staging_dir": stagingDir, "bytes_moved": bytesMoved}).Info("migration copy completed")
 
 	// 6. Verify
 	emit(5, "verify", "Verifying copy")
 	if !e.verifyCopy(installPath, stagingDir) {
 		_ = os.RemoveAll(stagingDir)
 		result.Message = "验证失败，移除临时目录"
+		logrus.WithFields(logrus.Fields{"source": installPath, "staging_dir": stagingDir}).Error("migration copy verification failed")
 		return result, nil
 	}
+	logrus.WithFields(logrus.Fields{"source": installPath, "staging_dir": stagingDir}).Info("migration copy verified")
 
-	// 7. Update environment variables (platform specific)
-	emit(6, "envvars", "Updating environment variables")
+	// Commit file copy before mutating environment variables.
 	finalDir := filepath.Join(targetDir, baseName)
-	if err := e.updateEnvVars(installPath, finalDir); err != nil {
+	if _, err := os.Stat(finalDir); err == nil {
 		_ = os.RemoveAll(stagingDir)
-		result.Message = "更新环境变量失败: " + err.Error()
+		result.Message = "target directory already exists: " + finalDir
+		logrus.WithField("final_dir", finalDir).Warn("migration target final directory already exists")
+		return result, nil
+	} else if !os.IsNotExist(err) {
+		_ = os.RemoveAll(stagingDir)
+		result.Message = "failed to check target directory: " + err.Error()
+		logrus.WithError(err).WithField("final_dir", finalDir).Error("migration failed to check final directory")
 		return result, nil
 	}
-
-	// 8. Commit: rename staging to final
-	emit(7, "commit", "Committing migration")
+	// 7. Commit: rename staging to final.
+	emit(6, "commit", "Committing migration")
 	if err := os.Rename(stagingDir, finalDir); err != nil {
-		// Rollback env vars
 		_ = e.restoreSnapshot(snap)
 		_ = os.RemoveAll(stagingDir)
 		result.Message = "提交失败: " + err.Error()
+		logrus.WithError(err).WithFields(logrus.Fields{"staging_dir": stagingDir, "final_dir": finalDir}).Error("migration commit failed")
+		return result, nil
+	}
+	logrus.WithFields(logrus.Fields{"staging_dir": stagingDir, "final_dir": finalDir}).Info("migration committed")
+
+	// 8. Update environment variables after the copy has been committed.
+	emit(7, "envvars", "Updating environment variables")
+	if err := e.updateEnvVars(installPath, finalDir); err != nil {
+		_ = os.RemoveAll(finalDir)
+		result.Message = "failed to update environment variables: " + err.Error()
+		logrus.WithError(err).WithFields(logrus.Fields{"old_path": installPath, "new_path": finalDir}).Error("migration environment variable update failed")
 		return result, nil
 	}
 
 	// 9. Create junction if requested (Windows only)
 	emit(8, "junction", "Creating junction or removing source")
 	if useJunction && runtime.GOOS == "windows" {
-		_ = e.createJunction(installPath, finalDir)
+		if err := os.RemoveAll(installPath); err != nil {
+			result.Message = "failed to remove source before creating junction: " + err.Error()
+			logrus.WithError(err).WithField("path", installPath).Error("migration failed to remove source before junction")
+			return result, nil
+		}
+		if err := e.createJunction(installPath, finalDir); err != nil {
+			result.Message = "failed to create junction: " + err.Error()
+			logrus.WithError(err).WithFields(logrus.Fields{"old_path": installPath, "new_path": finalDir}).Error("migration junction creation failed")
+			return result, nil
+		} else {
+			logrus.WithFields(logrus.Fields{"old_path": installPath, "new_path": finalDir}).Info("migration junction created")
+		}
 	} else {
 		// Remove source
-		_ = os.RemoveAll(installPath)
+		if err := os.RemoveAll(installPath); err != nil {
+			logrus.WithError(err).WithField("path", installPath).Warn("migration failed to remove source")
+		}
 	}
 
 	// 10. Update registry
@@ -150,7 +192,9 @@ func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction 
 		if paths[i].Type == models.PathInstall {
 			paths[i].Path = finalDir
 		}
-		_ = e.reg.SavePath(&paths[i])
+		if err := e.reg.SavePath(&paths[i]); err != nil {
+			logrus.WithError(err).WithField("path", paths[i].Path).Warn("migration failed to update registry path")
+		}
 	}
 
 	result.Success = true
@@ -158,20 +202,27 @@ func (e *Engine) MigrateWithProgress(envID int64, targetDir string, useJunction 
 	result.BytesMoved = bytesMoved
 	result.DurationMs = time.Since(start).Milliseconds()
 
-	_ = e.reg.SaveHistory(&models.HistoryEntry{
+	if err := e.reg.SaveHistory(&models.HistoryEntry{
 		Action:      "migrate",
 		TargetEnv:   fmt.Sprintf("env_%d", envID),
 		DetailsJSON: fmt.Sprintf(`{"from":"%s","to":"%s","bytes":%d}`, installPath, finalDir, bytesMoved),
 		Success:     true,
 		CreatedAt:   time.Now(),
-	})
+	}); err != nil {
+		logrus.WithError(err).WithField("env_id", envID).Warn("migration failed to save history")
+	}
 	emit(len(steps), "complete", "Migration complete")
+	logrus.WithFields(logrus.Fields{"env_id": envID, "bytes_moved": bytesMoved, "duration_ms": result.DurationMs}).Info("migration pipeline completed")
 
 	return result, nil
 }
 
 func (e *Engine) preCheck(envID int64, targetDir string) error {
-	paths, _ := e.reg.ListPaths(envID)
+	paths, err := e.reg.ListPaths(envID)
+	if err != nil {
+		logrus.WithError(err).WithField("env_id", envID).Error("migration precheck failed to list paths")
+		return err
+	}
 	var totalSize int64
 	installPath := ""
 	for _, p := range paths {
@@ -181,19 +232,24 @@ func (e *Engine) preCheck(envID int64, targetDir string) error {
 		}
 	}
 	if installPath == "" {
+		logrus.WithField("env_id", envID).Warn("migration precheck missing install path")
 		return fmt.Errorf("未找到安装路径")
 	}
 	if err := validateMigrationPaths(installPath, targetDir); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"source": installPath, "target_dir": targetDir}).Warn("migration path validation failed")
 		return err
 	}
 	// Check target dir exists or can be created after validating path safety.
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		logrus.WithError(err).WithField("target_dir", targetDir).Error("migration target directory is not writable")
 		return fmt.Errorf("目标目录不可写: %w", err)
 	}
 	// TODO: check actual free space on target disk
 	if totalSize == 0 {
+		logrus.WithField("env_id", envID).Warn("migration precheck source size is zero")
 		return fmt.Errorf("未能计算源目录大小")
 	}
+	logrus.WithFields(logrus.Fields{"env_id": envID, "install_path": installPath, "target_dir": targetDir, "total_size": totalSize}).Info("migration precheck passed")
 	return nil
 }
 
@@ -298,17 +354,24 @@ func comparablePath(path string) string {
 func (e *Engine) createSnapshot(envID int64) (*models.Snapshot, error) {
 	data, err := e.reg.ExportSnapshotData()
 	if err != nil {
+		logrus.WithError(err).WithField("env_id", envID).Error("failed to export snapshot data")
 		return nil, err
 	}
-	b, _ := json.Marshal(data)
+	b, err := json.Marshal(data)
+	if err != nil {
+		logrus.WithError(err).WithField("env_id", envID).Error("failed to marshal snapshot data")
+		return nil, err
+	}
 	snap := &models.Snapshot{
 		Name:      fmt.Sprintf("pre-migrate-%d-%d", envID, time.Now().Unix()),
 		DataJSON:  string(b),
 		CreatedAt: time.Now(),
 	}
 	if err := e.reg.SaveSnapshot(snap); err != nil {
+		logrus.WithError(err).WithField("env_id", envID).Error("failed to save migration snapshot")
 		return nil, err
 	}
+	logrus.WithFields(logrus.Fields{"env_id": envID, "snapshot_id": snap.ID}).Info("migration snapshot created")
 	return snap, nil
 }
 
@@ -318,15 +381,22 @@ func (e *Engine) restoreSnapshot(snap *models.Snapshot) error {
 	}
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(snap.DataJSON), &data); err != nil {
+		logrus.WithError(err).WithField("snapshot_id", snap.ID).Error("failed to unmarshal snapshot data")
 		return err
 	}
-	return e.reg.ImportSnapshotData(data)
+	if err := e.reg.ImportSnapshotData(data); err != nil {
+		logrus.WithError(err).WithField("snapshot_id", snap.ID).Error("failed to restore snapshot")
+		return err
+	}
+	logrus.WithField("snapshot_id", snap.ID).Info("snapshot restored")
+	return nil
 }
 
 func (e *Engine) copyDir(src, dst string) (int64, error) {
 	var total int64
 	err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			logrus.WithError(err).WithField("path", path).Error("migration copy walk failed")
 			return err
 		}
 		rel, err := filepath.Rel(src, path)
@@ -335,9 +405,14 @@ func (e *Engine) copyDir(src, dst string) (int64, error) {
 		}
 		dstPath := filepath.Join(dst, rel)
 		if info.IsDir() {
-			return os.MkdirAll(dstPath, info.Mode())
+			if err := os.MkdirAll(dstPath, info.Mode()); err != nil {
+				logrus.WithError(err).WithField("path", dstPath).Error("migration failed to create destination directory")
+				return err
+			}
+			return nil
 		}
 		if err := copyFile(path, dstPath); err != nil {
+			logrus.WithError(err).WithFields(logrus.Fields{"source": path, "destination": dstPath}).Error("migration failed to copy file")
 			return err
 		}
 		total += info.Size()
@@ -385,7 +460,9 @@ func (e *Engine) verifyCopy(src, dst string) bool {
 		return nil
 	})
 
-	return srcCount == dstCount && srcSize == dstSize
+	matched := srcCount == dstCount && srcSize == dstSize
+	logrus.WithFields(logrus.Fields{"source": src, "destination": dst, "source_files": srcCount, "destination_files": dstCount, "source_size": srcSize, "destination_size": dstSize, "matched": matched}).Info("migration copy verification result")
+	return matched
 }
 
 func (e *Engine) updateEnvVars(oldPath, newPath string) error {

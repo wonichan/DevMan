@@ -103,7 +103,9 @@ func ExecutableVersion(exe string, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, exe, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, exe, args...)
+	hideCommandWindow(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "unknown"
 	}

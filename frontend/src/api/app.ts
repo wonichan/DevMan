@@ -7,7 +7,10 @@ import {
   Migrate as _Migrate,
   AnalyzeCleanable as _AnalyzeCleanable,
   CleanItems as _CleanItems,
-} from '../bindings/go/main/App';
+  GetSettings as _GetSettings,
+  SaveSettings as _SaveSettings,
+} from '../../wailsjs/go/main/App';
+import { EventsOn as _EventsOn } from '../../wailsjs/runtime/runtime';
 
 import type {
   EnvSummary,
@@ -51,62 +54,41 @@ export function CleanItems(items: CleanableItem[]): Promise<number> {
   return _CleanItems(items);
 }
 
-interface WailsGoApp {
-  ScanAll(): Promise<EnvSummary[]>;
-  GetEnvs(): Promise<Env[]>;
-  GetEnvSummary(key: string): Promise<EnvSummary | null>;
-  GetDiskInfo(): Promise<DiskInfo[]>;
-  GetHistory(limit: number): Promise<HistoryEntry[]>;
-  Migrate(envID: number, targetDir: string, useJunction: boolean): Promise<MigrationResult>;
-  AnalyzeCleanable(): Promise<CleanableItem[]>;
-  CleanItems(items: CleanableItem[]): Promise<number>;
-  GetSettings?(): Promise<AppSettings>;
-  SaveSettings?(settings: AppSettings): Promise<void>;
-}
-
-interface WailsGoMain {
-  App?: WailsGoApp;
-}
-
-interface WailsGo {
-  main?: WailsGoMain;
-}
-
 interface WailsRuntime {
   EventsOn(eventName: string, callback: (...data: unknown[]) => void): () => void;
 }
 
 declare global {
   interface Window {
-    go?: WailsGo;
+    go?: unknown;
     runtime?: WailsRuntime;
   }
 }
 
+const defaultSettings: AppSettings = {
+  AutoScanOnStartup: false,
+  ConfirmBeforeMigration: true,
+  Theme: 'dark',
+  CustomScanPaths: [],
+};
+
+function hasWailsBridge(): boolean {
+  return typeof window !== 'undefined' && Boolean(window.go);
+}
+
 export function GetSettings(): Promise<AppSettings> {
-  const fn = window.go?.main?.App?.GetSettings;
-  if (!fn) {
-    return Promise.resolve({
-      AutoScanOnStartup: true,
-      ConfirmBeforeMigration: true,
-      Theme: 'dark',
-      CustomScanPaths: [],
-    });
-  }
-  return fn();
+  if (!hasWailsBridge()) return Promise.resolve(defaultSettings);
+  return _GetSettings() as Promise<AppSettings>;
 }
 
 export function SaveSettings(settings: AppSettings): Promise<void> {
-  const fn = window.go?.main?.App?.SaveSettings;
-  if (!fn) {
-    return Promise.reject(new Error('设置 API 尚未就绪'));
-  }
-  return fn(settings);
+  if (!hasWailsBridge()) return Promise.reject(new Error('Settings API is not ready'));
+  return _SaveSettings(settings);
 }
 
 export function EventsOn(eventName: string, callback: (...data: unknown[]) => void): () => void {
   if (window.runtime?.EventsOn) {
-    return window.runtime.EventsOn(eventName, callback);
+    return _EventsOn(eventName, callback);
   }
   return () => {};
 }

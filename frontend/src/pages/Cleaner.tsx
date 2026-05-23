@@ -192,7 +192,7 @@ export default function Cleaner() {
 
       <p className="text-xs text-slate-500 mt-6 text-center">
         <WarningIcon className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
-        只有安全可恢复的缓存会被列出。清理前会自动创建快照。
+        仅清理当前分析结果中的已选目录；执行前请确认路径和风险等级。
       </p>
     </div>
   );

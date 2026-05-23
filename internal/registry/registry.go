@@ -11,6 +11,7 @@ import (
 	"devman/internal/models"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/sirupsen/logrus"
 )
 
 type Registry struct {
@@ -39,21 +40,28 @@ func logPath() string {
 }
 
 func Open() (*Registry, error) {
-	db, err := sql.Open("sqlite3", dbPath())
+	path := dbPath()
+	logrus.WithField("db_path", path).Info("opening registry database")
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
+		logrus.WithError(err).WithField("db_path", path).Error("failed to open registry database")
 		return nil, err
 	}
 	if err := db.Ping(); err != nil {
+		logrus.WithError(err).WithField("db_path", path).Error("failed to ping registry database")
 		return nil, err
 	}
 	r := &Registry{db: db}
 	if err := r.migrate(); err != nil {
+		logrus.WithError(err).WithField("db_path", path).Error("failed to migrate registry database")
 		return nil, err
 	}
+	logrus.WithField("db_path", path).Info("registry database opened")
 	return r, nil
 }
 
 func (r *Registry) Close() error {
+	logrus.Info("closing registry database")
 	return r.db.Close()
 }
 
@@ -123,11 +131,22 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `
 	_, err := r.db.Exec(schema)
+	if err != nil {
+		logrus.WithError(err).Error("registry schema migration failed")
+		return err
+	}
+	logrus.Info("registry schema migration complete")
 	return err
 }
 
 func (r *Registry) SaveEnv(env *models.Env) error {
-	res, err := r.db.Exec(
+	now := time.Now()
+	if env.CreatedAt.IsZero() {
+		env.CreatedAt = now
+	}
+	env.UpdatedAt = now
+
+	_, err := r.db.Exec(
 		`INSERT INTO envs (name, key, category, icon, description, website, is_managed, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
@@ -138,11 +157,12 @@ func (r *Registry) SaveEnv(env *models.Env) error {
 		env.CreatedAt, env.UpdatedAt,
 	)
 	if err != nil {
+		logrus.WithError(err).WithField("env_key", env.Key).Error("failed to save environment")
 		return err
 	}
-	if env.ID == 0 {
-		id, _ := res.LastInsertId()
-		env.ID = id
+	if err := r.db.QueryRow(`SELECT id FROM envs WHERE key = ?`, env.Key).Scan(&env.ID); err != nil {
+		logrus.WithError(err).WithField("env_key", env.Key).Error("failed to reload saved environment id")
+		return err
 	}
 	return nil
 }
@@ -188,6 +208,7 @@ func (r *Registry) SaveInstance(inst *models.EnvInstance) error {
 		inst.EnvID, inst.Version, inst.InstallPath, inst.IsDefault, inst.IsActive, inst.Source, inst.DetectedAt,
 	)
 	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"env_id": inst.EnvID, "install_path": inst.InstallPath}).Error("failed to save environment instance")
 		return err
 	}
 	id, _ := res.LastInsertId()
@@ -229,6 +250,7 @@ func (r *Registry) SavePath(p *models.EnvPath) error {
 		p.EnvID, p.InstanceID, p.Type, p.Path, p.SizeBytes, p.IsMovable, p.LastSized,
 	)
 	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"env_id": p.EnvID, "type": p.Type, "path": p.Path}).Error("failed to save environment path")
 		return err
 	}
 	id, _ := res.LastInsertId()
@@ -263,6 +285,7 @@ func (r *Registry) ListPaths(envID int64) ([]models.EnvPath, error) {
 func (r *Registry) SaveSnapshot(s *models.Snapshot) error {
 	res, err := r.db.Exec(`INSERT INTO snapshots (name, data_json, created_at) VALUES (?, ?, ?)`, s.Name, s.DataJSON, s.CreatedAt)
 	if err != nil {
+		logrus.WithError(err).WithField("snapshot_name", s.Name).Error("failed to save snapshot")
 		return err
 	}
 	id, _ := res.LastInsertId()
@@ -276,6 +299,7 @@ func (r *Registry) SaveHistory(h *models.HistoryEntry) error {
 		h.Action, h.TargetEnv, h.DetailsJSON, h.Success, h.ErrorMessage, h.CreatedAt,
 	)
 	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"action": h.Action, "target_env": h.TargetEnv}).Error("failed to save history")
 		return err
 	}
 	id, _ := res.LastInsertId()
@@ -388,6 +412,7 @@ func (r *Registry) GetSettings() (*models.AppSettings, error) {
 func (r *Registry) SaveSettings(s *models.AppSettings) error {
 	data, err := json.Marshal(s)
 	if err != nil {
+		logrus.WithError(err).Error("failed to marshal settings")
 		return err
 	}
 	_, err = r.db.Exec(
@@ -395,6 +420,9 @@ func (r *Registry) SaveSettings(s *models.AppSettings) error {
 		 ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at`,
 		string(data), time.Now(),
 	)
+	if err != nil {
+		logrus.WithError(err).Error("failed to save settings")
+	}
 	return err
 }
 
@@ -448,23 +476,89 @@ func (r *Registry) ExportSnapshotData() (map[string]interface{}, error) {
 }
 
 func (r *Registry) ImportSnapshotData(data map[string]interface{}) error {
-	// Clear existing
-	_, _ = r.db.Exec(`DELETE FROM env_paths`)
-	_, _ = r.db.Exec(`DELETE FROM env_instances`)
-	_, _ = r.db.Exec(`DELETE FROM envs`)
+	envs, err := snapshotSlice[models.Env](data, "envs")
+	if err != nil {
+		return err
+	}
+	instances, err := snapshotSlice[models.EnvInstance](data, "instances")
+	if err != nil {
+		return err
+	}
+	paths, err := snapshotSlice[models.EnvPath](data, "paths")
+	if err != nil {
+		return err
+	}
 
-	// Re-insert envs
-	envsRaw, ok := data["envs"].([]interface{})
-	if ok {
-		for _, eRaw := range envsRaw {
-			b, _ := json.Marshal(eRaw)
-			var e models.Env
-			json.Unmarshal(b, &e)
-			if e.Key != "" {
-				r.SaveEnv(&e)
-			}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM env_paths`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM env_instances`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM envs`); err != nil {
+		return err
+	}
+
+	for _, e := range envs {
+		if e.Key == "" {
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO envs (id, name, key, category, icon, description, website, is_managed, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			e.ID, e.Name, e.Key, e.Category, e.Icon, e.Description, e.Website, e.IsManaged, e.CreatedAt, e.UpdatedAt,
+		); err != nil {
+			return err
 		}
 	}
-	// Note: instances and paths would need similar handling
-	return nil
+
+	for _, i := range instances {
+		if i.EnvID == 0 || i.InstallPath == "" {
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO env_instances (id, env_id, version, install_path, is_default, is_active, source, detected_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			i.ID, i.EnvID, i.Version, i.InstallPath, i.IsDefault, i.IsActive, i.Source, i.DetectedAt,
+		); err != nil {
+			return err
+		}
+	}
+
+	for _, p := range paths {
+		if p.EnvID == 0 || p.Path == "" {
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO env_paths (id, env_id, instance_id, type, path, size_bytes, is_movable, last_sized)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.ID, p.EnvID, p.InstanceID, p.Type, p.Path, p.SizeBytes, p.IsMovable, p.LastSized,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func snapshotSlice[T any](data map[string]interface{}, key string) ([]T, error) {
+	raw, ok := data[key]
+	if !ok {
+		return nil, nil
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("marshal snapshot %s: %w", key, err)
+	}
+	var out []T
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("unmarshal snapshot %s: %w", key, err)
+	}
+	return out, nil
 }

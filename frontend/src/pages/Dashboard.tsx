@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ScanAll, GetDiskInfo } from '../api/app';
+import { ScanAll, GetDiskInfo, GetEnvs, GetEnvSummary, GetSettings } from '../api/app';
 import type { EnvSummary, DiskInfo } from '../devman-types';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
@@ -24,14 +24,20 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const { success, error } = useToast();
 
-  const load = async () => {
+  const loadStoredSummaries = async (): Promise<EnvSummary[]> => {
+    const envs = await GetEnvs();
+    const summaries = await Promise.all((envs || []).map((env) => GetEnvSummary(env.Key)));
+    return summaries.filter((summary): summary is EnvSummary => Boolean(summary));
+  };
+
+  const load = async (refresh = true) => {
     setLoading(true);
     try {
-      const s = await ScanAll();
+      const s = refresh ? await ScanAll() : await loadStoredSummaries();
       setSummaries(s || []);
       const d = await GetDiskInfo();
       setDisks(d || []);
-      success('刷新成功', '环境数据已更新');
+      if (refresh) success('刷新成功', '环境数据已更新');
     } catch (e: unknown) {
       error('加载失败', e instanceof Error ? e.message : String(e));
     }
@@ -42,7 +48,8 @@ export default function Dashboard() {
     const initLoad = async () => {
       setLoading(true);
       try {
-        const s = await ScanAll();
+        const settings = await GetSettings();
+        const s = settings.AutoScanOnStartup ? await ScanAll() : await loadStoredSummaries();
         setSummaries(s || []);
         const d = await GetDiskInfo();
         setDisks(d || []);
@@ -67,7 +74,7 @@ export default function Dashboard() {
         title="Dashboard" 
         description="总览你的开发环境状态"
         actions={
-          <Button onClick={load} disabled={loading} isLoading={loading}>
+          <Button onClick={() => load(true)} disabled={loading} isLoading={loading}>
             <RefreshIcon className="mr-2 h-4 w-4" />
             刷新
           </Button>

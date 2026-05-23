@@ -6,3 +6,4 @@ frontend/dist
 .omo/
 .playwright-mcp/
 .sisyphus/
+.tmp/

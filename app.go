@@ -11,8 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -21,6 +23,7 @@ type App struct {
 	reg      *registry.Registry
 	engine   *scanner.Engine
 	migrator *migrator.Engine
+	scanMu   sync.Mutex
 }
 
 func NewApp() *App {
@@ -28,77 +31,134 @@ func NewApp() *App {
 }
 
 func (a *App) startup(ctx context.Context) {
+	logrus.Info("application startup begin")
 	a.ctx = ctx
 
 	// Ensure db directory exists (portable mode: same dir as exe)
 	if exe, err := os.Executable(); err == nil {
 		dbDir := filepath.Dir(exe)
-		os.MkdirAll(dbDir, 0755)
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			logrus.WithError(err).WithField("dir", dbDir).Error("failed to ensure executable directory")
+		} else {
+			logrus.WithField("dir", dbDir).Info("executable directory ready")
+		}
+	} else {
+		logrus.WithError(err).Warn("failed to resolve executable path")
 	}
 
 	reg, err := registry.Open()
 	if err != nil {
-		fmt.Println("Failed to open registry:", err)
+		logrus.WithError(err).Error("failed to open registry")
 		return
 	}
 	a.reg = reg
 	a.engine = scanner.NewEngine(reg)
 	a.migrator = migrator.New(reg)
+	logrus.Info("application startup complete")
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	logrus.Info("application shutdown begin")
 	if a.reg != nil {
-		a.reg.Close()
+		if err := a.reg.Close(); err != nil {
+			logrus.WithError(err).Error("failed to close registry")
+		} else {
+			logrus.Info("registry closed")
+		}
 	}
+	logrus.Info("application shutdown complete")
 }
 
 // ScanAll runs all scanners and returns summaries
 func (a *App) ScanAll() ([]models.EnvSummary, error) {
+	logrus.Info("scan all requested")
 	if a.engine == nil {
+		logrus.Error("scan all failed: engine not initialized")
 		return nil, fmt.Errorf("engine not initialized")
 	}
+	if !a.scanMu.TryLock() {
+		logrus.Warn("scan all skipped: scan already in progress")
+		return nil, fmt.Errorf("scan already in progress")
+	}
+	defer a.scanMu.Unlock()
 	settings, err := a.GetSettings()
 	if err != nil {
+		logrus.WithError(err).Error("scan all failed to load settings")
 		return nil, err
 	}
-	return a.engine.ScanAllWithOptions(scanner.ScanOptions{CustomScanPaths: settings.CustomScanPaths})
+	summaries, err := a.engine.ScanAllWithOptions(scanner.ScanOptions{CustomScanPaths: settings.CustomScanPaths})
+	if err != nil {
+		logrus.WithError(err).Error("scan all failed")
+		return nil, err
+	}
+	logrus.WithField("summary_count", len(summaries)).Info("scan all completed")
+	return summaries, nil
 }
 
 // GetSettings returns the current application settings
 func (a *App) GetSettings() (*models.AppSettings, error) {
 	if a.reg == nil {
+		logrus.Error("get settings failed: registry not initialized")
 		return nil, fmt.Errorf("registry not initialized")
 	}
-	return a.reg.GetSettings()
+	settings, err := a.reg.GetSettings()
+	if err != nil {
+		logrus.WithError(err).Error("get settings failed")
+		return nil, err
+	}
+	return settings, nil
 }
 
 // SaveSettings persists application settings
 func (a *App) SaveSettings(settings models.AppSettings) error {
+	logrus.WithField("custom_scan_paths", len(settings.CustomScanPaths)).Info("save settings requested")
 	if a.reg == nil {
+		logrus.Error("save settings failed: registry not initialized")
 		return fmt.Errorf("registry not initialized")
 	}
-	return a.reg.SaveSettings(&settings)
+	if err := a.reg.SaveSettings(&settings); err != nil {
+		logrus.WithError(err).Error("save settings failed")
+		return err
+	}
+	logrus.Info("settings saved")
+	return nil
 }
 
 // GetEnvs returns all stored environments
 func (a *App) GetEnvs() ([]models.Env, error) {
 	if a.reg == nil {
+		logrus.Error("get environments failed: registry not initialized")
 		return nil, fmt.Errorf("registry not initialized")
 	}
-	return a.reg.ListEnvs()
+	envs, err := a.reg.ListEnvs()
+	if err != nil {
+		logrus.WithError(err).Error("get environments failed")
+		return nil, err
+	}
+	logrus.WithField("env_count", len(envs)).Info("get environments completed")
+	return envs, nil
 }
 
 // GetEnvSummary returns full summary for an env
 func (a *App) GetEnvSummary(key string) (*models.EnvSummary, error) {
+	logrus.WithField("env_key", key).Info("get environment summary requested")
 	if a.reg == nil {
+		logrus.Error("get environment summary failed: registry not initialized")
 		return nil, fmt.Errorf("registry not initialized")
 	}
 	env, err := a.reg.GetEnvByKey(key)
 	if err != nil || env == nil {
+		logrus.WithError(err).WithField("env_key", key).Warn("environment not found")
 		return nil, fmt.Errorf("env not found: %s", key)
 	}
-	instances, _ := a.reg.ListInstances(env.ID)
-	paths, _ := a.reg.ListPaths(env.ID)
+	instances, err := a.reg.ListInstances(env.ID)
+	if err != nil {
+		logrus.WithError(err).WithField("env_id", env.ID).Warn("failed to list environment instances")
+	}
+	paths, err := a.reg.ListPaths(env.ID)
+	if err != nil {
+		logrus.WithError(err).WithField("env_id", env.ID).Warn("failed to list environment paths")
+	}
 
 	totalSize := int64(0)
 	for _, p := range paths {
@@ -110,18 +170,22 @@ func (a *App) GetEnvSummary(key string) (*models.EnvSummary, error) {
 		health = models.HealthWarning
 	}
 
-	return &models.EnvSummary{
+	summary := &models.EnvSummary{
 		Env:       *env,
 		Instances: instances,
 		Paths:     paths,
 		TotalSize: totalSize,
 		Health:    health,
-	}, nil
+	}
+	logrus.WithFields(logrus.Fields{"env_key": key, "instances": len(instances), "paths": len(paths), "total_size": totalSize}).Info("get environment summary completed")
+	return summary, nil
 }
 
 // Migrate moves an env to target directory
 func (a *App) Migrate(envID int64, targetDir string, useJunction bool) (*migrator.MigrationResult, error) {
+	logrus.WithFields(logrus.Fields{"env_id": envID, "target_dir": targetDir, "use_junction": useJunction}).Info("migration requested")
 	if a.migrator == nil {
+		logrus.Error("migration failed: migrator not initialized")
 		return nil, fmt.Errorf("migrator not initialized")
 	}
 
@@ -130,29 +194,55 @@ func (a *App) Migrate(envID int64, targetDir string, useJunction bool) (*migrato
 			wailsRuntime.EventsEmit(a.ctx, "migration:progress", progress)
 		}
 	}
-	return a.migrator.MigrateWithProgress(envID, targetDir, useJunction, emitProgress)
+	result, err := a.migrator.MigrateWithProgress(envID, targetDir, useJunction, emitProgress)
+	if err != nil {
+		logrus.WithError(err).WithField("env_id", envID).Error("migration failed with error")
+		return nil, err
+	}
+	if result != nil && result.Success {
+		logrus.WithFields(logrus.Fields{"env_id": envID, "bytes_moved": result.BytesMoved, "duration_ms": result.DurationMs}).Info("migration completed")
+	} else if result != nil {
+		logrus.WithFields(logrus.Fields{"env_id": envID, "message": result.Message}).Warn("migration completed without success")
+	}
+	return result, nil
 }
 
 // GetDiskInfo returns disk usage info (stub on Linux)
 func (a *App) GetDiskInfo() ([]models.DiskInfo, error) {
-	return utils.GetDiskInfo()
+	disks, err := utils.GetDiskInfo()
+	if err != nil {
+		logrus.WithError(err).Error("get disk info failed")
+		return nil, err
+	}
+	logrus.WithField("disk_count", len(disks)).Info("get disk info completed")
+	return disks, nil
 }
 
 // Platform-specific disk info removed — now in utils package
 func (a *App) GetHistory(limit int) ([]models.HistoryEntry, error) {
 	if a.reg == nil {
+		logrus.Error("get history failed: registry not initialized")
 		return nil, fmt.Errorf("registry not initialized")
 	}
-	return a.reg.GetHistory(limit)
+	history, err := a.reg.GetHistory(limit)
+	if err != nil {
+		logrus.WithError(err).WithField("limit", limit).Error("get history failed")
+		return nil, err
+	}
+	logrus.WithFields(logrus.Fields{"limit": limit, "history_count": len(history)}).Info("get history completed")
+	return history, nil
 }
 
 // AnalyzeCleanable returns items that can be safely cleaned
 func (a *App) AnalyzeCleanable() ([]models.CleanableItem, error) {
+	logrus.Info("analyze cleanable requested")
 	if a.reg == nil {
+		logrus.Error("analyze cleanable failed: registry not initialized")
 		return nil, fmt.Errorf("registry not initialized")
 	}
 	envs, err := a.reg.ListEnvs()
 	if err != nil {
+		logrus.WithError(err).Error("analyze cleanable failed to list environments")
 		return nil, err
 	}
 
@@ -246,14 +336,17 @@ func (a *App) AnalyzeCleanable() ([]models.CleanableItem, error) {
 		}
 	}
 
+	logrus.WithField("item_count", len(items)).Info("analyze cleanable completed")
 	return items, nil
 }
 
 // CleanItems removes selected cache directories
 func (a *App) CleanItems(items []models.CleanableItem) (int64, error) {
+	logrus.WithField("item_count", len(items)).Info("clean items requested")
 	var totalFreed int64
 	allowedItems, err := a.AnalyzeCleanable()
 	if err != nil {
+		logrus.WithError(err).Error("clean items failed to analyze allowed items")
 		return 0, err
 	}
 	allowed := make(map[string]models.CleanableItem, len(allowedItems))
@@ -270,19 +363,23 @@ func (a *App) CleanItems(items []models.CleanableItem) (int64, error) {
 		}
 		path, ok := normalizedCleanPath(item.Path)
 		if !ok || !isSafeCleanPath(path) {
+			logrus.WithField("path", item.Path).Warn("unsafe clean path skipped")
 			failures = append(failures, fmt.Sprintf("unsafe path skipped: %s", item.Path))
 			continue
 		}
 		allowedItem, ok := allowed[path]
 		if !ok {
+			logrus.WithField("path", item.Path).Warn("unrecognized clean path skipped")
 			failures = append(failures, fmt.Sprintf("unrecognized cleanable path skipped: %s", item.Path))
 			continue
 		}
 		size := scanner.DirSize(path)
 		if err := os.RemoveAll(path); err != nil {
+			logrus.WithError(err).WithField("path", path).Error("failed to clean path")
 			failures = append(failures, fmt.Sprintf("%s: %v", path, err))
 			continue
 		}
+		logrus.WithFields(logrus.Fields{"path": path, "bytes": size, "env_key": allowedItem.EnvKey}).Info("cleaned path")
 		totalFreed += size
 		_ = a.reg.SaveHistory(&models.HistoryEntry{
 			Action:      "clean",
@@ -293,8 +390,10 @@ func (a *App) CleanItems(items []models.CleanableItem) (int64, error) {
 		})
 	}
 	if len(failures) > 0 {
+		logrus.WithFields(logrus.Fields{"bytes_freed": totalFreed, "failures": len(failures)}).Warn("clean items completed with failures")
 		return totalFreed, fmt.Errorf("%s", strings.Join(failures, "; "))
 	}
+	logrus.WithField("bytes_freed", totalFreed).Info("clean items completed")
 	return totalFreed, nil
 }
 

@@ -5,6 +5,9 @@ import (
 	"devman/internal/registry"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Scanner interface {
@@ -48,10 +51,16 @@ func (e *Engine) ScanAll() ([]models.EnvSummary, error) {
 }
 
 func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, error) {
+	start := time.Now()
+	logrus.WithFields(logrus.Fields{"scanner_count": len(e.scanners), "custom_scan_paths": len(opts.CustomScanPaths)}).Info("environment scan started")
 	var summaries []models.EnvSummary
 	for _, s := range e.scanners {
+		scannerStart := time.Now()
+		entry := logrus.WithField("scanner", s.Name())
+		entry.Info("scanner started")
 		instances, paths, err := s.Detect()
 		if err != nil {
+			entry.WithError(err).Error("scanner failed")
 			continue
 		}
 
@@ -62,23 +71,31 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 		}
 
 		if len(instances) == 0 {
+			entry.WithField("duration_ms", time.Since(scannerStart).Milliseconds()).Info("scanner completed with no instances")
 			continue
 		}
 
 		// Save env metadata
 		env := modelsForScanner(s)
 		if err := e.reg.SaveEnv(&env); err != nil {
+			entry.WithError(err).WithField("env_key", env.Key).Error("failed to save scanned environment")
 			continue
 		}
 
 		// Clear old data
-		_ = e.reg.ClearInstances(env.ID)
-		_ = e.reg.ClearPaths(env.ID)
+		if err := e.reg.ClearInstances(env.ID); err != nil {
+			entry.WithError(err).WithField("env_id", env.ID).Warn("failed to clear old instances")
+		}
+		if err := e.reg.ClearPaths(env.ID); err != nil {
+			entry.WithError(err).WithField("env_id", env.ID).Warn("failed to clear old paths")
+		}
 
 		// Save instances
 		for i := range instances {
 			instances[i].EnvID = env.ID
-			_ = e.reg.SaveInstance(&instances[i])
+			if err := e.reg.SaveInstance(&instances[i]); err != nil {
+				entry.WithError(err).WithField("install_path", instances[i].InstallPath).Warn("failed to save scanned instance")
+			}
 		}
 
 		// Save paths and compute sizes
@@ -87,7 +104,9 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 			if paths[i].SizeBytes == 0 {
 				paths[i].SizeBytes = DirSize(paths[i].Path)
 			}
-			_ = e.reg.SavePath(&paths[i])
+			if err := e.reg.SavePath(&paths[i]); err != nil {
+				entry.WithError(err).WithField("path", paths[i].Path).Warn("failed to save scanned path")
+			}
 		}
 
 		totalSize := int64(0)
@@ -107,7 +126,9 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 			TotalSize: totalSize,
 			Health:    health,
 		})
+		entry.WithFields(logrus.Fields{"instances": len(instances), "paths": len(paths), "total_size": totalSize, "duration_ms": time.Since(scannerStart).Milliseconds()}).Info("scanner completed")
 	}
+	logrus.WithFields(logrus.Fields{"summary_count": len(summaries), "duration_ms": time.Since(start).Milliseconds()}).Info("environment scan completed")
 	return summaries, nil
 }
 

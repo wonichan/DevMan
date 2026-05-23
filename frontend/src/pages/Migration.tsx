@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { GetEnvs, GetEnvSummary, Migrate, GetDiskInfo, EventsOn } from '../api/app';
+import { GetEnvs, GetEnvSummary, Migrate, GetDiskInfo, EventsOn, GetSettings } from '../api/app';
 import type { EnvSummary, DiskInfo, MigrationProgress, MigrationResult } from '../devman-types';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
@@ -36,6 +36,7 @@ export default function Migration() {
   const [result, setResult] = useState<MigrationResult | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState<MigrationProgress | null>(null);
+  const [confirmBeforeMigration, setConfirmBeforeMigration] = useState(true);
 
   const { success, error } = useToast();
   const { confirm } = useConfirm();
@@ -43,6 +44,9 @@ export default function Migration() {
   useEffect(() => {
     loadEnvs();
     loadDisks();
+    GetSettings()
+      .then((settings) => setConfirmBeforeMigration(settings.ConfirmBeforeMigration))
+      .catch(() => setConfirmBeforeMigration(true));
   }, []);
 
   useEffect(() => {
@@ -90,13 +94,15 @@ export default function Migration() {
   const startMigration = async () => {
     if (!selectedEnv) return;
     
-    const isConfirmed = await confirm({
-      title: '确认执行迁移',
-      description: `即将迁移 ${selectedEnv.Env.Name} 到 ${targetDir}。此操作会移动文件并更新环境变量。`,
-      confirmText: '立即迁移',
-      cancelText: '取消',
-      variant: 'danger'
-    });
+    const isConfirmed = confirmBeforeMigration
+      ? await confirm({
+          title: '确认执行迁移',
+          description: `即将迁移 ${selectedEnv.Env.Name} 到 ${targetDir}。此操作会移动文件并更新环境变量。`,
+          confirmText: '立即迁移',
+          cancelText: '取消',
+          variant: 'danger'
+        })
+      : true;
 
     if (!isConfirmed) return;
 

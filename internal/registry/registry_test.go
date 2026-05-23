@@ -69,6 +69,27 @@ func TestSaveAndGetEnv(t *testing.T) {
 	}
 }
 
+func TestSaveEnvReloadsIDAfterConflict(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	first := &models.Env{Name: "Node.js", Key: "nodejs", Category: models.CategoryRuntime}
+	if err := reg.SaveEnv(first); err != nil {
+		t.Fatalf("save first env failed: %v", err)
+	}
+	if first.ID == 0 {
+		t.Fatal("first env ID should be assigned")
+	}
+
+	second := &models.Env{Name: "Node.js Updated", Key: "nodejs", Category: models.CategoryRuntime}
+	if err := reg.SaveEnv(second); err != nil {
+		t.Fatalf("save conflicting env failed: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("expected conflicting save to reload id %d, got %d", first.ID, second.ID)
+	}
+}
+
 func TestInstancesAndPaths(t *testing.T) {
 	reg, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -171,6 +192,69 @@ func TestSnapshot(t *testing.T) {
 	}
 	if fetched.Name != "test-snap" {
 		t.Errorf("expected name 'test-snap', got %s", fetched.Name)
+	}
+}
+
+func TestImportSnapshotDataRestoresInstancesAndPaths(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	env := &models.Env{Name: "Go", Key: "go", Category: models.CategoryRuntime}
+	if err := reg.SaveEnv(env); err != nil {
+		t.Fatalf("save env failed: %v", err)
+	}
+	inst := &models.EnvInstance{
+		EnvID:       env.ID,
+		Version:     "go1.25.0",
+		InstallPath: `C:\Go`,
+		IsDefault:   true,
+		IsActive:    true,
+		Source:      "system",
+		DetectedAt:  time.Now(),
+	}
+	if err := reg.SaveInstance(inst); err != nil {
+		t.Fatalf("save instance failed: %v", err)
+	}
+	path := &models.EnvPath{
+		EnvID:     env.ID,
+		Type:      models.PathInstall,
+		Path:      `C:\Go`,
+		SizeBytes: 123,
+		IsMovable: true,
+		LastSized: time.Now(),
+	}
+	if err := reg.SavePath(path); err != nil {
+		t.Fatalf("save path failed: %v", err)
+	}
+
+	data, err := reg.ExportSnapshotData()
+	if err != nil {
+		t.Fatalf("export snapshot data failed: %v", err)
+	}
+	if err := reg.ClearInstances(env.ID); err != nil {
+		t.Fatalf("clear instances failed: %v", err)
+	}
+	if err := reg.ClearPaths(env.ID); err != nil {
+		t.Fatalf("clear paths failed: %v", err)
+	}
+
+	if err := reg.ImportSnapshotData(data); err != nil {
+		t.Fatalf("import snapshot data failed: %v", err)
+	}
+
+	restoredInstances, err := reg.ListInstances(env.ID)
+	if err != nil {
+		t.Fatalf("list restored instances failed: %v", err)
+	}
+	if len(restoredInstances) != 1 || restoredInstances[0].InstallPath != inst.InstallPath {
+		t.Fatalf("expected restored instance %q, got %#v", inst.InstallPath, restoredInstances)
+	}
+	restoredPaths, err := reg.ListPaths(env.ID)
+	if err != nil {
+		t.Fatalf("list restored paths failed: %v", err)
+	}
+	if len(restoredPaths) != 1 || restoredPaths[0].Path != path.Path {
+		t.Fatalf("expected restored path %q, got %#v", path.Path, restoredPaths)
 	}
 }
 
