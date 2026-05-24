@@ -131,6 +131,14 @@ type AppSettings struct {
 	CustomScanPaths        []string `json:"CustomScanPaths"`
 }
 
+type MetricSnapshot struct {
+	ID         int64     `json:"Id"`
+	MetricKey  string    `json:"MetricKey"`
+	TargetKey  string    `json:"TargetKey"`
+	ValueBytes int64     `json:"ValueBytes"`
+	CapturedAt time.Time `json:"CapturedAt"`
+}
+
 type MigrationProgress struct {
 	Step       string `json:"Step"`
 	StepIndex  int    `json:"StepIndex"`

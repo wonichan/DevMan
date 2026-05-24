@@ -129,6 +129,18 @@ CREATE TABLE IF NOT EXISTS settings (
     value_json TEXT NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS metric_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metric_key TEXT NOT NULL,
+    target_key TEXT NOT NULL,
+    value_bytes INTEGER NOT NULL,
+    captured_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_metrics_key ON metric_snapshots(metric_key);
+CREATE INDEX IF NOT EXISTS idx_metrics_target ON metric_snapshots(metric_key, target_key);
+CREATE INDEX IF NOT EXISTS idx_metrics_captured ON metric_snapshots(captured_at);
 `
 	_, err := r.db.Exec(schema)
 	if err != nil {
@@ -427,6 +439,61 @@ func (r *Registry) SaveSettings(s *models.AppSettings) error {
 }
 
 // Export/Import for snapshots
+
+func (r *Registry) SaveMetricSnapshot(s *models.MetricSnapshot) error {
+	res, err := r.db.Exec(
+		`INSERT INTO metric_snapshots (metric_key, target_key, value_bytes, captured_at) VALUES (?, ?, ?, ?)`,
+		s.MetricKey, s.TargetKey, s.ValueBytes, s.CapturedAt,
+	)
+	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"metric_key": s.MetricKey, "target_key": s.TargetKey}).Error("failed to save metric snapshot")
+		return err
+	}
+	id, _ := res.LastInsertId()
+	s.ID = id
+	return nil
+}
+
+func (r *Registry) ListMetricSnapshots(metricKey, targetKey string, limit int) ([]models.MetricSnapshot, error) {
+	var rows *sql.Rows
+	var err error
+	if targetKey != "" {
+		rows, err = r.db.Query(
+			`SELECT id, metric_key, target_key, value_bytes, captured_at FROM metric_snapshots WHERE metric_key = ? AND target_key = ? ORDER BY captured_at DESC LIMIT ?`,
+			metricKey, targetKey, limit,
+		)
+	} else {
+		rows, err = r.db.Query(
+			`SELECT id, metric_key, target_key, value_bytes, captured_at FROM metric_snapshots WHERE metric_key = ? ORDER BY captured_at DESC LIMIT ?`,
+			metricKey, limit,
+		)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []models.MetricSnapshot
+	for rows.Next() {
+		var s models.MetricSnapshot
+		if err := rows.Scan(&s.ID, &s.MetricKey, &s.TargetKey, &s.ValueBytes, &s.CapturedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, s)
+	}
+	return list, rows.Err()
+}
+
+func (r *Registry) PruneMetricSnapshots(metricKey string, keepCount int) error {
+	_, err := r.db.Exec(
+		`DELETE FROM metric_snapshots WHERE metric_key = ? AND id NOT IN (SELECT id FROM metric_snapshots WHERE metric_key = ? ORDER BY captured_at DESC LIMIT ?)`,
+		metricKey, metricKey, keepCount,
+	)
+	if err != nil {
+		logrus.WithError(err).WithField("metric_key", metricKey).Error("failed to prune metric snapshots")
+	}
+	return err
+}
+
 func (r *Registry) ExportSnapshotData() (map[string]interface{}, error) {
 	envs, err := r.ListEnvs()
 	if err != nil {

@@ -15,6 +15,8 @@ export function GetEnvs():Promise<Array<models.Env>>;
 
 export function GetHistory(arg1:number):Promise<Array<models.HistoryEntry>>;
 
+export function GetMetricSnapshots(arg1:string,arg2:string,arg3:number):Promise<Array<models.MetricSnapshot>>;
+
 export function GetSettings():Promise<models.AppSettings>;
 
 export function Migrate(arg1:number,arg2:string,arg3:boolean):Promise<migrator.MigrationResult>;

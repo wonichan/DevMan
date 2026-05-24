@@ -92,7 +92,42 @@ func (a *App) ScanAll() ([]models.EnvSummary, error) {
 		return nil, err
 	}
 	logrus.WithField("summary_count", len(summaries)).Info("scan all completed")
+	a.saveScanMetricSnapshots(summaries)
 	return summaries, nil
+}
+
+func (a *App) saveScanMetricSnapshots(summaries []models.EnvSummary) {
+	if a.reg == nil {
+		return
+	}
+	now := time.Now()
+	var totalSize int64
+	for _, s := range summaries {
+		if s.TotalSize > 0 {
+			if err := a.reg.SaveMetricSnapshot(&models.MetricSnapshot{
+				MetricKey:  "env_total_size",
+				TargetKey:  s.Env.Key,
+				ValueBytes: s.TotalSize,
+				CapturedAt: now,
+			}); err != nil {
+				logrus.WithError(err).WithFields(logrus.Fields{"metric_key": "env_total_size", "target_key": s.Env.Key}).Warn("failed to save per-env metric snapshot")
+			}
+			totalSize += s.TotalSize
+		}
+	}
+	if totalSize > 0 {
+		if err := a.reg.SaveMetricSnapshot(&models.MetricSnapshot{
+			MetricKey:  "env_total_size",
+			TargetKey:  "all",
+			ValueBytes: totalSize,
+			CapturedAt: now,
+		}); err != nil {
+			logrus.WithError(err).WithField("metric_key", "env_total_size").Warn("failed to save aggregate metric snapshot")
+		}
+	}
+	if err := a.reg.PruneMetricSnapshots("env_total_size", 1000); err != nil {
+		logrus.WithError(err).WithField("metric_key", "env_total_size").Warn("failed to prune metric snapshots")
+	}
 }
 
 // GetSettings returns the current application settings
@@ -231,6 +266,24 @@ func (a *App) GetHistory(limit int) ([]models.HistoryEntry, error) {
 	}
 	logrus.WithFields(logrus.Fields{"limit": limit, "history_count": len(history)}).Info("get history completed")
 	return history, nil
+}
+
+// GetMetricSnapshots returns metric snapshots for trend cards
+func (a *App) GetMetricSnapshots(metricKey string, targetKey string, limit int) ([]models.MetricSnapshot, error) {
+	if a.reg == nil {
+		logrus.Error("get metric snapshots failed: registry not initialized")
+		return nil, fmt.Errorf("registry not initialized")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	snapshots, err := a.reg.ListMetricSnapshots(metricKey, targetKey, limit)
+	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"metric_key": metricKey, "target_key": targetKey}).Error("get metric snapshots failed")
+		return nil, err
+	}
+	logrus.WithFields(logrus.Fields{"metric_key": metricKey, "target_key": targetKey, "count": len(snapshots)}).Info("get metric snapshots completed")
+	return snapshots, nil
 }
 
 // AnalyzeCleanable returns items that can be safely cleaned
@@ -391,10 +444,29 @@ func (a *App) CleanItems(items []models.CleanableItem) (int64, error) {
 	}
 	if len(failures) > 0 {
 		logrus.WithFields(logrus.Fields{"bytes_freed": totalFreed, "failures": len(failures)}).Warn("clean items completed with failures")
+		a.saveCleanMetricSnapshot(totalFreed)
 		return totalFreed, fmt.Errorf("%s", strings.Join(failures, "; "))
 	}
 	logrus.WithField("bytes_freed", totalFreed).Info("clean items completed")
+	a.saveCleanMetricSnapshot(totalFreed)
 	return totalFreed, nil
+}
+
+func (a *App) saveCleanMetricSnapshot(totalFreed int64) {
+	if totalFreed <= 0 || a.reg == nil {
+		return
+	}
+	if err := a.reg.SaveMetricSnapshot(&models.MetricSnapshot{
+		MetricKey:  "clean_freed_bytes",
+		TargetKey:  "all",
+		ValueBytes: totalFreed,
+		CapturedAt: time.Now(),
+	}); err != nil {
+		logrus.WithError(err).WithField("metric_key", "clean_freed_bytes").Warn("failed to save metric snapshot")
+	}
+	if err := a.reg.PruneMetricSnapshots("clean_freed_bytes", 1000); err != nil {
+		logrus.WithError(err).WithField("metric_key", "clean_freed_bytes").Warn("failed to prune metric snapshots")
+	}
 }
 
 func normalizedCleanPath(path string) (string, bool) {

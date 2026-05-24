@@ -308,6 +308,45 @@ export namespace models {
 		    return a;
 		}
 	}
+	export class MetricSnapshot {
+	    Id: number;
+	    MetricKey: string;
+	    TargetKey: string;
+	    ValueBytes: number;
+	    // Go type: time
+	    CapturedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new MetricSnapshot(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Id = source["Id"];
+	        this.MetricKey = source["MetricKey"];
+	        this.TargetKey = source["TargetKey"];
+	        this.ValueBytes = source["ValueBytes"];
+	        this.CapturedAt = this.convertValues(source["CapturedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
 

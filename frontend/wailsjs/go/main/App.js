@@ -26,6 +26,10 @@ export function GetHistory(arg1) {
   return window['go']['main']['App']['GetHistory'](arg1);
 }
 
+export function GetMetricSnapshots(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetMetricSnapshots'](arg1, arg2, arg3);
+}
+
 export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }

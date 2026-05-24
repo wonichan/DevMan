@@ -9,6 +9,7 @@ import {
   CleanItems as _CleanItems,
   GetSettings as _GetSettings,
   SaveSettings as _SaveSettings,
+  GetMetricSnapshots as _GetMetricSnapshots,
 } from '../../wailsjs/go/main/App';
 import { EventsOn as _EventsOn } from '../../wailsjs/runtime/runtime';
 
@@ -20,6 +21,7 @@ import type {
   CleanableItem,
   AppSettings,
   MigrationResult,
+  MetricSnapshot,
 } from '../devman-types';
 
 export function ScanAll(): Promise<EnvSummary[]> {
@@ -84,6 +86,11 @@ export function GetSettings(): Promise<AppSettings> {
 export function SaveSettings(settings: AppSettings): Promise<void> {
   if (!hasWailsBridge()) return Promise.reject(new Error('Settings API is not ready'));
   return _SaveSettings(settings);
+}
+
+export function GetMetricSnapshots(metricKey: string, targetKey: string, limit: number): Promise<MetricSnapshot[]> {
+  if (!hasWailsBridge()) return Promise.resolve([]);
+  return _GetMetricSnapshots(metricKey, targetKey, limit) as Promise<MetricSnapshot[]>;
 }
 
 export function EventsOn(eventName: string, callback: (...data: unknown[]) => void): () => void {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AnalyzeCleanable, CleanItems } from '../api/app';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useConfirm } from '../hooks/useConfirm';
 import { useToast } from '../hooks/useToast';
+import { usePageActions } from '../hooks/usePageActions';
 import { SearchIcon, TrashIcon, WarningIcon } from '../components/icons';
 import type { CleanableItem } from '../devman-types';
 
@@ -99,6 +100,8 @@ export default function Cleaner() {
   const totalSize = items.reduce((sum, i) => sum + (i.SizeBytes || 0), 0);
   const selectedSize = items.filter(i => i.Selected).reduce((sum, i) => sum + (i.SizeBytes || 0), 0);
   const selectedCount = items.filter(i => i.Selected).length;
+
+  usePageActions('cleaner', { refresh: analyze });
 
   return (
     <div>

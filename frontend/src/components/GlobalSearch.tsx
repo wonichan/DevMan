@@ -32,6 +32,12 @@ const actionItems: SearchItem[] = [
   { id: 'action-clean', label: '分析可清理项', subtitle: 'AnalyzeCleanable', type: 'action', icon: '🧹', action: () => {} },
 ];
 
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
+}
+
 export default function GlobalSearch({ onNavigate }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -42,7 +48,8 @@ export default function GlobalSearch({ onNavigate }: Props) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        if (isTypingTarget(e.target)) return;
         e.preventDefault();
         setOpen((prev) => !prev);
       }

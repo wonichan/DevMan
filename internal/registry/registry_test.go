@@ -350,3 +350,171 @@ func TestSaveSettingsOverwrite(t *testing.T) {
 		t.Errorf("expected 1 custom scan path after overwrite, got %d", len(fetched.CustomScanPaths))
 	}
 }
+
+func TestSaveAndListMetricSnapshots(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	s1 := &models.MetricSnapshot{
+		MetricKey:  "env_total_size",
+		TargetKey:  "nodejs",
+		ValueBytes: 1024 * 1024 * 500,
+		CapturedAt: now,
+	}
+	if err := reg.SaveMetricSnapshot(s1); err != nil {
+		t.Fatalf("save metric snapshot failed: %v", err)
+	}
+	if s1.ID == 0 {
+		t.Error("metric snapshot ID should be assigned after insert")
+	}
+
+	s2 := &models.MetricSnapshot{
+		MetricKey:  "env_total_size",
+		TargetKey:  "nodejs",
+		ValueBytes: 1024 * 1024 * 600,
+		CapturedAt: now.Add(time.Hour),
+	}
+	if err := reg.SaveMetricSnapshot(s2); err != nil {
+		t.Fatalf("save second metric snapshot failed: %v", err)
+	}
+
+	snapshots, err := reg.ListMetricSnapshots("env_total_size", "nodejs", 10)
+	if err != nil {
+		t.Fatalf("list metric snapshots failed: %v", err)
+	}
+	if len(snapshots) != 2 {
+		t.Errorf("expected 2 snapshots, got %d", len(snapshots))
+	}
+	if snapshots[0].ValueBytes <= snapshots[1].ValueBytes {
+		t.Error("snapshots should be ordered by captured_at DESC")
+	}
+
+	allSnapshots, err := reg.ListMetricSnapshots("env_total_size", "", 10)
+	if err != nil {
+		t.Fatalf("list all metric snapshots failed: %v", err)
+	}
+	if len(allSnapshots) != 2 {
+		t.Errorf("expected 2 snapshots without target filter, got %d", len(allSnapshots))
+	}
+}
+
+func TestListMetricSnapshotsDifferentKeys(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	sizeSnap := &models.MetricSnapshot{
+		MetricKey:  "env_total_size",
+		TargetKey:  "go",
+		ValueBytes: 300 * 1024 * 1024,
+		CapturedAt: now,
+	}
+	cleanSnap := &models.MetricSnapshot{
+		MetricKey:  "clean_freed_bytes",
+		TargetKey:  "all",
+		ValueBytes: 50 * 1024 * 1024,
+		CapturedAt: now,
+	}
+	if err := reg.SaveMetricSnapshot(sizeSnap); err != nil {
+		t.Fatalf("save size snapshot failed: %v", err)
+	}
+	if err := reg.SaveMetricSnapshot(cleanSnap); err != nil {
+		t.Fatalf("save clean snapshot failed: %v", err)
+	}
+
+	sizeList, err := reg.ListMetricSnapshots("env_total_size", "", 10)
+	if err != nil {
+		t.Fatalf("list size snapshots failed: %v", err)
+	}
+	if len(sizeList) != 1 {
+		t.Errorf("expected 1 size snapshot, got %d", len(sizeList))
+	}
+
+	cleanList, err := reg.ListMetricSnapshots("clean_freed_bytes", "", 10)
+	if err != nil {
+		t.Fatalf("list clean snapshots failed: %v", err)
+	}
+	if len(cleanList) != 1 {
+		t.Errorf("expected 1 clean snapshot, got %d", len(cleanList))
+	}
+}
+
+func TestAggregateMetricSnapshot(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	perEnvSnapshots := []struct {
+		targetKey  string
+		valueBytes int64
+	}{
+		{"nodejs", 500 * 1024 * 1024},
+		{"python", 300 * 1024 * 1024},
+		{"go", 200 * 1024 * 1024},
+	}
+	var totalSize int64
+	for i, s := range perEnvSnapshots {
+		totalSize += s.valueBytes
+		if err := reg.SaveMetricSnapshot(&models.MetricSnapshot{
+			MetricKey:  "env_total_size",
+			TargetKey:  s.targetKey,
+			ValueBytes: s.valueBytes,
+			CapturedAt: now,
+		}); err != nil {
+			t.Fatalf("save per-env snapshot %d failed: %v", i, err)
+		}
+	}
+	if err := reg.SaveMetricSnapshot(&models.MetricSnapshot{
+		MetricKey:  "env_total_size",
+		TargetKey:  "all",
+		ValueBytes: totalSize,
+		CapturedAt: now,
+	}); err != nil {
+		t.Fatalf("save aggregate snapshot failed: %v", err)
+	}
+
+	aggSnapshots, err := reg.ListMetricSnapshots("env_total_size", "all", 10)
+	if err != nil {
+		t.Fatalf("list aggregate snapshots failed: %v", err)
+	}
+	if len(aggSnapshots) != 1 {
+		t.Fatalf("expected 1 aggregate snapshot, got %d", len(aggSnapshots))
+	}
+	if aggSnapshots[0].ValueBytes != totalSize {
+		t.Errorf("expected aggregate value %d, got %d", totalSize, aggSnapshots[0].ValueBytes)
+	}
+	if aggSnapshots[0].TargetKey != "all" {
+		t.Errorf("expected target_key 'all', got %s", aggSnapshots[0].TargetKey)
+	}
+}
+
+func TestPruneMetricSnapshots(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		s := &models.MetricSnapshot{
+			MetricKey:  "env_total_size",
+			TargetKey:  "nodejs",
+			ValueBytes: int64((i + 1) * 100 * 1024 * 1024),
+			CapturedAt: now.Add(time.Duration(i) * time.Hour),
+		}
+		if err := reg.SaveMetricSnapshot(s); err != nil {
+			t.Fatalf("save snapshot %d failed: %v", i, err)
+		}
+	}
+
+	if err := reg.PruneMetricSnapshots("env_total_size", 3); err != nil {
+		t.Fatalf("prune metric snapshots failed: %v", err)
+	}
+
+	snapshots, err := reg.ListMetricSnapshots("env_total_size", "nodejs", 10)
+	if err != nil {
+		t.Fatalf("list after prune failed: %v", err)
+	}
+	if len(snapshots) != 3 {
+		t.Errorf("expected 3 snapshots after prune, got %d", len(snapshots))
+	}
+}

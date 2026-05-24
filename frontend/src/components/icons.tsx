@@ -145,6 +145,13 @@ export const PlusIcon = (props: IconProps) => (
   </IconWrapper>
 );
 
+export const TrendingUpIcon = (props: IconProps) => (
+  <IconWrapper {...props}>
+    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+    <polyline points="17 6 23 6 23 12" />
+  </IconWrapper>
+);
+
 export const CommandIcon = (props: IconProps) => (
   <IconWrapper {...props}>
     <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />

@@ -92,3 +92,11 @@ export interface MigrationResult {
   bytesMoved?: number;
   durationMs?: number;
 }
+
+export interface MetricSnapshot {
+  Id: number;
+  MetricKey: string;
+  TargetKey: string;
+  ValueBytes: number;
+  CapturedAt: string;
+}
