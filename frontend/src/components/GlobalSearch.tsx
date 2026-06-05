@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { GetEnvs } from '../api/app';
 import { SearchIcon, CommandIcon } from './icons';
+import { ManagementBadge } from './ui/ManagementBadge';
 import type { Env } from '../devman-types';
 
 type Page = 'dashboard' | 'environments' | 'migration' | 'cleaner' | 'versions' | 'settings';
@@ -11,6 +12,7 @@ interface SearchItem {
   subtitle?: string;
   type: 'page' | 'env' | 'action';
   icon: string;
+  managed?: boolean;
   action: () => void;
 }
 
@@ -71,14 +73,20 @@ export default function GlobalSearch({ onNavigate }: Props) {
   }, [open]);
 
   const buildItems = useCallback((): SearchItem[] => {
-    const envItems: SearchItem[] = envs.map((env) => ({
-      id: `env-${env.Key}`,
-      label: env.Name,
-      subtitle: env.Key,
-      type: 'env',
-      icon: env.Icon,
-      action: () => onNavigate('environments'),
-    }));
+    const envItems: SearchItem[] = [...envs]
+      .sort((a, b) => {
+        if (a.IsManaged !== b.IsManaged) return a.IsManaged ? -1 : 1;
+        return a.Name.localeCompare(b.Name);
+      })
+      .map((env) => ({
+        id: `env-${env.Key}`,
+        label: env.Name,
+        subtitle: env.Key,
+        type: 'env',
+        icon: env.Icon,
+        managed: env.IsManaged,
+        action: () => onNavigate('environments'),
+      }));
 
     const pages = pageItems.map((p) => ({
       ...p,
@@ -217,6 +225,7 @@ export default function GlobalSearch({ onNavigate }: Props) {
                   <span className="text-xs px-2 py-0.5 rounded bg-[#1e293b] border border-[#334155] text-slate-500 capitalize">
                     {item.type === 'page' ? '页面' : item.type === 'env' ? '环境' : '操作'}
                   </span>
+                  {item.type === 'env' && <ManagementBadge managed={Boolean(item.managed)} />}
                 </button>
               ))}
             </div>
