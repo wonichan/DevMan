@@ -40,6 +40,15 @@ function buildTrendData(snapshots: MetricSnapshot[]): TrendPoint[] {
   return points.slice(-10);
 }
 
+function sortSummaries(list: EnvSummary[]): EnvSummary[] {
+  return [...list].sort((a, b) => {
+    if (a.Env.IsManaged !== b.Env.IsManaged) {
+      return a.Env.IsManaged ? -1 : 1;
+    }
+    return a.Env.Name.localeCompare(b.Env.Name);
+  });
+}
+
 function TrendChart({ data }: { data: TrendPoint[] }) {
   if (data.length < 2) return null;
   const width = 280;
@@ -86,14 +95,14 @@ export default function Dashboard() {
   const loadStoredSummaries = async (): Promise<EnvSummary[]> => {
     const envs = await GetEnvs();
     const summaries = await Promise.all((envs || []).map((env) => GetEnvSummary(env.Key)));
-    return summaries.filter((summary): summary is EnvSummary => Boolean(summary));
+    return sortSummaries(summaries.filter((summary): summary is EnvSummary => Boolean(summary)));
   };
 
   const load = async (refresh = true) => {
     setLoading(true);
     try {
       const s = refresh ? await ScanAll() : await loadStoredSummaries();
-      setSummaries(s || []);
+      setSummaries(sortSummaries(s || []));
       const d = await GetDiskInfo();
       setDisks(d || []);
       if (refresh) {
@@ -123,7 +132,7 @@ export default function Dashboard() {
       try {
         const settings = await GetSettings();
         const s = settings.AutoScanOnStartup ? await ScanAll() : await loadStoredSummaries();
-        setSummaries(s || []);
+        setSummaries(sortSummaries(s || []));
         const d = await GetDiskInfo();
         setDisks(d || []);
       } catch (e: unknown) {
@@ -138,6 +147,7 @@ export default function Dashboard() {
   usePageActions('dashboard', { refresh: () => load(true) });
 
   const totalEnvSize = summaries.reduce((sum, s) => sum + (s.TotalSize || 0), 0);
+  const managedCount = summaries.filter((summary) => summary.Env.IsManaged).length;
   const cDisk = disks.find(d => d.Letter === 'C:') || disks[0];
   const cUsedPercent = cDisk ? Math.round(((cDisk.TotalBytes - cDisk.FreeBytes) / cDisk.TotalBytes) * 100) : 0;
 
@@ -161,7 +171,7 @@ export default function Dashboard() {
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-6">
         <SurfaceCard variant="raised">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
@@ -170,6 +180,17 @@ export default function Dashboard() {
             <div>
               <p className="text-xs text-slate-400">已检测环境</p>
               <p className="text-2xl font-bold text-slate-100">{summaries.length}</p>
+            </div>
+          </div>
+        </SurfaceCard>
+        <SurfaceCard variant="raised">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+              <CheckIcon className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Managed</p>
+              <p className="text-2xl font-bold text-slate-100">{managedCount}</p>
             </div>
           </div>
         </SurfaceCard>
@@ -269,7 +290,14 @@ export default function Dashboard() {
                     <p className="text-xs text-slate-400">{summary.Instances.length} 个版本</p>
                   </div>
                 </div>
-                <StatusBadge status={summary.Health === 'healthy' ? 'healthy' : 'warning'} label={summary.Health === 'healthy' ? '正常' : '需关注'} />
+                <div className="flex flex-col items-end gap-2">
+                  <StatusBadge status={summary.Health === 'healthy' ? 'healthy' : 'warning'} label={summary.Health === 'healthy' ? '正常' : '需关注'} />
+                  <span className={`text-xs px-2 py-0.5 rounded-md ${
+                    summary.Env.IsManaged ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
+                  }`}>
+                    {summary.Env.IsManaged ? 'Managed' : 'Unmanaged'}
+                  </span>
+                </div>
               </div>
               <div className="space-y-2">
                 {summary.Instances.slice(0, 2).map(inst => (

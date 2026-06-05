@@ -8,6 +8,15 @@ import { SearchIcon } from '../components/icons';
 import { useToast } from '../hooks/useToast';
 import type { EnvSummary } from '../devman-types';
 
+function sortSummaries(list: EnvSummary[]): EnvSummary[] {
+  return [...list].sort((a, b) => {
+    if (a.Env.IsManaged !== b.Env.IsManaged) {
+      return a.Env.IsManaged ? -1 : 1;
+    }
+    return a.Env.Name.localeCompare(b.Env.Name);
+  });
+}
+
 export default function Versions() {
   const [envs, setEnvs] = useState<EnvSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -22,7 +31,7 @@ export default function Versions() {
         const s = await GetEnvSummary(e.Key);
         if (s) summaries.push(s);
       }
-      setEnvs(summaries);
+      setEnvs(sortSummaries(summaries));
     } catch (e: unknown) {
       error('加载失败', e instanceof Error ? e.message : String(e));
     }
@@ -49,6 +58,14 @@ export default function Versions() {
                 <h3 className="font-bold text-slate-200">{env.Env.Name}</h3>
                 <p className="text-xs text-slate-400">{env.Instances.length} 个版本已安装</p>
               </div>
+            </div>
+
+            <div className="mb-4">
+              <span className={`text-xs px-2 py-0.5 rounded-md ${
+                env.Env.IsManaged ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
+              }`}>
+                {env.Env.IsManaged ? 'Managed' : 'Unmanaged'}
+              </span>
             </div>
 
             <div className="space-y-2">
