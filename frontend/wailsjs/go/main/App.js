@@ -34,6 +34,10 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function ManageEnv(arg1) {
+  return window['go']['main']['App']['ManageEnv'](arg1);
+}
+
 export function Migrate(arg1, arg2, arg3) {
   return window['go']['main']['App']['Migrate'](arg1, arg2, arg3);
 }
@@ -44,4 +48,8 @@ export function SaveSettings(arg1) {
 
 export function ScanAll() {
   return window['go']['main']['App']['ScanAll']();
+}
+
+export function UnmanageEnv(arg1) {
+  return window['go']['main']['App']['UnmanageEnv'](arg1);
 }

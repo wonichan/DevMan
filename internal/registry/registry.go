@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"devman/internal/models"
@@ -164,7 +165,7 @@ func (r *Registry) SaveEnv(env *models.Env) error {
 		 ON CONFLICT(key) DO UPDATE SET
 		   name=excluded.name, category=excluded.category, icon=excluded.icon,
 		   description=excluded.description, website=excluded.website,
-		   is_managed=excluded.is_managed, updated_at=excluded.updated_at`,
+		   is_managed=envs.is_managed, updated_at=excluded.updated_at`,
 		env.Name, env.Key, env.Category, env.Icon, env.Description, env.Website, env.IsManaged,
 		env.CreatedAt, env.UpdatedAt,
 	)
@@ -177,6 +178,39 @@ func (r *Registry) SaveEnv(env *models.Env) error {
 		return err
 	}
 	return nil
+}
+
+func (r *Registry) SetEnvManaged(key string, managed bool) (*models.Env, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, fmt.Errorf("env key is required")
+	}
+	now := time.Now()
+	managedValue := 0
+	if managed {
+		managedValue = 1
+	}
+	res, err := r.db.Exec(`UPDATE envs SET is_managed = ?, updated_at = ? WHERE key = ?`, managedValue, now, key)
+	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"env_key": key, "managed": managed}).Error("failed to update environment management state")
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		logrus.WithError(err).WithField("env_key", key).Error("failed to inspect environment management update")
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, fmt.Errorf("env not found: %s", key)
+	}
+	env, err := r.GetEnvByKey(key)
+	if err != nil {
+		logrus.WithError(err).WithField("env_key", key).Error("failed to reload managed environment")
+		return nil, err
+	}
+	if env == nil {
+		return nil, fmt.Errorf("env not found: %s", key)
+	}
+	return env, nil
 }
 
 func (r *Registry) GetEnvByKey(key string) (*models.Env, error) {

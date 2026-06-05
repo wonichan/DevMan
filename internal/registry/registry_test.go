@@ -90,6 +90,86 @@ func TestSaveEnvReloadsIDAfterConflict(t *testing.T) {
 	}
 }
 
+func TestSetEnvManaged(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	env := &models.Env{Name: "Go", Key: "go", Category: models.CategoryRuntime}
+	if err := reg.SaveEnv(env); err != nil {
+		t.Fatalf("save env failed: %v", err)
+	}
+	fetched, err := reg.GetEnvByKey("go")
+	if err != nil {
+		t.Fatalf("get env failed: %v", err)
+	}
+	if fetched.IsManaged {
+		t.Fatal("newly saved env should default to unmanaged")
+	}
+
+	managed, err := reg.SetEnvManaged("go", true)
+	if err != nil {
+		t.Fatalf("set env managed failed: %v", err)
+	}
+	if !managed.IsManaged {
+		t.Fatal("expected env to be managed")
+	}
+
+	unmanaged, err := reg.SetEnvManaged("go", false)
+	if err != nil {
+		t.Fatalf("set env unmanaged failed: %v", err)
+	}
+	if unmanaged.IsManaged {
+		t.Fatal("expected env to be unmanaged")
+	}
+}
+
+func TestSetEnvManagedRejectsUnknownAndEmptyKeys(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	if _, err := reg.SetEnvManaged("missing", true); err == nil {
+		t.Fatal("expected unknown key to return an error")
+	}
+	if _, err := reg.SetEnvManaged(" ", true); err == nil {
+		t.Fatal("expected empty key to return an error")
+	}
+}
+
+func TestSaveEnvPreservesManagedStateOnConflict(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	env := &models.Env{Name: "Go", Key: "go", Category: models.CategoryRuntime, Description: "Original"}
+	if err := reg.SaveEnv(env); err != nil {
+		t.Fatalf("save env failed: %v", err)
+	}
+	if _, err := reg.SetEnvManaged("go", true); err != nil {
+		t.Fatalf("set env managed failed: %v", err)
+	}
+
+	scanned := &models.Env{
+		Name:        "Go Updated",
+		Key:         "go",
+		Category:    models.CategoryRuntime,
+		Description: "Scanner metadata update",
+		IsManaged:   false,
+	}
+	if err := reg.SaveEnv(scanned); err != nil {
+		t.Fatalf("save scanner env failed: %v", err)
+	}
+
+	fetched, err := reg.GetEnvByKey("go")
+	if err != nil {
+		t.Fatalf("get env failed: %v", err)
+	}
+	if !fetched.IsManaged {
+		t.Fatal("scanner save should not clear managed state")
+	}
+	if fetched.Name != "Go Updated" || fetched.Description != "Scanner metadata update" {
+		t.Fatalf("scanner metadata should update while preserving managed state, got %#v", fetched)
+	}
+}
+
 func TestInstancesAndPaths(t *testing.T) {
 	reg, cleanup := setupTestDB(t)
 	defer cleanup()

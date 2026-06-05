@@ -2,6 +2,8 @@ import {
   ScanAll as _ScanAll,
   GetEnvs as _GetEnvs,
   GetEnvSummary as _GetEnvSummary,
+  ManageEnv as _ManageEnv,
+  UnmanageEnv as _UnmanageEnv,
   GetDiskInfo as _GetDiskInfo,
   GetHistory as _GetHistory,
   Migrate as _Migrate,
@@ -34,6 +36,16 @@ export function GetEnvs(): Promise<Env[]> {
 
 export function GetEnvSummary(key: string): Promise<EnvSummary | null> {
   return _GetEnvSummary(key);
+}
+
+export function ManageEnv(key: string): Promise<Env> {
+  if (!hasWailsBridge()) return Promise.reject(new Error('Environment management API is not ready'));
+  return _ManageEnv(key) as Promise<Env>;
+}
+
+export function UnmanageEnv(key: string): Promise<Env> {
+  if (!hasWailsBridge()) return Promise.reject(new Error('Environment management API is not ready'));
+  return _UnmanageEnv(key) as Promise<Env>;
 }
 
 export function GetDiskInfo(): Promise<DiskInfo[]> {

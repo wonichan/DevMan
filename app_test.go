@@ -97,3 +97,47 @@ func TestSaveCleanMetricSnapshotSkipsZeroBytes(t *testing.T) {
 		t.Fatalf("expected no zero-byte clean snapshot, got %#v", snapshots)
 	}
 }
+
+func TestManageAndUnmanageEnv(t *testing.T) {
+	app := setupTestApp(t)
+
+	env := &models.Env{Name: "Go", Key: "go", Category: models.CategoryRuntime}
+	if err := app.reg.SaveEnv(env); err != nil {
+		t.Fatalf("save env failed: %v", err)
+	}
+
+	managed, err := app.ManageEnv("go")
+	if err != nil {
+		t.Fatalf("manage env failed: %v", err)
+	}
+	if !managed.IsManaged {
+		t.Fatal("expected managed env")
+	}
+
+	unmanaged, err := app.UnmanageEnv("go")
+	if err != nil {
+		t.Fatalf("unmanage env failed: %v", err)
+	}
+	if unmanaged.IsManaged {
+		t.Fatal("expected unmanaged env")
+	}
+
+	history, err := app.reg.GetHistory(10)
+	if err != nil {
+		t.Fatalf("get history failed: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 management history entries, got %#v", history)
+	}
+	if history[0].Action != "unmanage_env" || history[1].Action != "manage_env" {
+		t.Fatalf("unexpected history order/actions: %#v", history)
+	}
+}
+
+func TestManageEnvRejectsEmptyKey(t *testing.T) {
+	app := setupTestApp(t)
+
+	if _, err := app.ManageEnv(" "); err == nil {
+		t.Fatal("expected empty key to fail")
+	}
+}

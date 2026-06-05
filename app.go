@@ -174,6 +174,48 @@ func (a *App) GetEnvs() ([]models.Env, error) {
 	return envs, nil
 }
 
+// ManageEnv marks a detected environment as user-approved for DevMan tracking.
+func (a *App) ManageEnv(key string) (*models.Env, error) {
+	return a.setEnvManaged(key, true)
+}
+
+// UnmanageEnv removes DevMan tracking approval from a detected environment.
+func (a *App) UnmanageEnv(key string) (*models.Env, error) {
+	return a.setEnvManaged(key, false)
+}
+
+func (a *App) setEnvManaged(key string, managed bool) (*models.Env, error) {
+	action := "unmanage_env"
+	if managed {
+		action = "manage_env"
+	}
+	logrus.WithFields(logrus.Fields{"env_key": key, "managed": managed}).Info("environment management update requested")
+	if a.reg == nil {
+		logrus.WithField("env_key", key).Error("environment management update failed: registry not initialized")
+		return nil, fmt.Errorf("registry not initialized")
+	}
+	if strings.TrimSpace(key) == "" {
+		logrus.Error("environment management update failed: env key is required")
+		return nil, fmt.Errorf("env key is required")
+	}
+	env, err := a.reg.SetEnvManaged(key, managed)
+	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"env_key": key, "managed": managed}).Error("environment management update failed")
+		return nil, err
+	}
+	if err := a.reg.SaveHistory(&models.HistoryEntry{
+		Action:      action,
+		TargetEnv:   key,
+		DetailsJSON: fmt.Sprintf(`{"key":"%s","managed":%t}`, key, managed),
+		Success:     true,
+		CreatedAt:   time.Now(),
+	}); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"env_key": key, "managed": managed}).Warn("failed to save environment management history")
+	}
+	logrus.WithFields(logrus.Fields{"env_key": key, "managed": managed}).Info("environment management update completed")
+	return env, nil
+}
+
 // GetEnvSummary returns full summary for an env
 func (a *App) GetEnvSummary(key string) (*models.EnvSummary, error) {
 	logrus.WithField("env_key", key).Info("get environment summary requested")

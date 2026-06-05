@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { GetEnvs } from '../api/app';
+import { GetEnvs, ManageEnv, UnmanageEnv } from '../api/app';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
 import { Button } from '../components/ui/Button';
@@ -13,7 +13,8 @@ export default function Environments() {
   const [envs, setEnvs] = useState<Env[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
-  const { error } = useToast();
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const { error, success } = useToast();
 
   const load = async () => {
     setLoading(true);
@@ -21,74 +22,107 @@ export default function Environments() {
       const data = await GetEnvs();
       setEnvs(data || []);
     } catch (e: unknown) {
-      error('加载失败', e instanceof Error ? e.message : String(e));
+      error('Load failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
     load();
   }, []);
 
-  const filtered = envs.filter(e =>
-    e.Name.toLowerCase().includes(search.toLowerCase()) ||
-    e.Key.toLowerCase().includes(search.toLowerCase())
-  );
+  const updateManagement = async (env: Env) => {
+    setPendingKey(env.Key);
+    try {
+      const updated = env.IsManaged ? await UnmanageEnv(env.Key) : await ManageEnv(env.Key);
+      setEnvs((current) => current.map((item) => (item.Key === updated.Key ? updated : item)));
+      success(updated.IsManaged ? 'Environment managed' : 'Environment unmanaged', updated.Name);
+    } catch (e: unknown) {
+      error(env.IsManaged ? 'Unmanage failed' : 'Manage failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setPendingKey(null);
+    }
+  };
+
+  const filtered = envs.filter((env) => {
+    const term = search.toLowerCase();
+    return env.Name.toLowerCase().includes(term) || env.Key.toLowerCase().includes(term);
+  });
 
   return (
     <div>
-      <PageHeader 
-        title="环境管理" 
-        description="查看和管理已安装的开发环境"
+      <PageHeader
+        title="Environment Management"
+        description="View scanned development environments and track approved tools."
       />
 
       <div className="flex items-center gap-4 mb-6">
         <div className="flex-1 relative">
           <input
             type="text"
-            placeholder="搜索环境..."
+            placeholder="Search environments..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(event) => setSearch(event.target.value)}
             className="w-full px-4 py-2.5 bg-[#1e293b]/80 border border-[#334155] rounded-xl text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all"
           />
         </div>
         <Button variant="secondary" onClick={load} isLoading={loading}>
           <RefreshIcon className="mr-2 h-4 w-4" />
-          刷新
+          Refresh
         </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {filtered.map((env) => (
-          <SurfaceCard key={env.Key} variant="interactive">
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{env.Icon}</span>
-                <div>
-                  <h3 className="text-base font-bold text-slate-200">{env.Name}</h3>
-                  <p className="text-xs text-slate-400">{env.Category}</p>
+        {filtered.map((env) => {
+          const isPending = pendingKey === env.Key;
+          return (
+            <SurfaceCard key={env.Key} variant="interactive">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-2xl shrink-0">{env.Icon}</span>
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-slate-200 truncate">{env.Name}</h3>
+                    <p className="text-xs text-slate-400 truncate">{env.Category}</p>
+                  </div>
+                </div>
+                <StatusBadge status="healthy" label="Healthy" />
+              </div>
+
+              <p className="text-xs text-slate-400 mb-4 h-8 overflow-hidden line-clamp-2">{env.Description}</p>
+
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-xs text-slate-500 truncate">{env.Website}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`min-w-[86px] text-center text-xs px-2 py-1 rounded-md ${
+                      env.IsManaged ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {env.IsManaged ? 'Managed' : 'Unmanaged'}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant={env.IsManaged ? 'ghost' : 'secondary'}
+                    className="w-[92px]"
+                    onClick={() => updateManagement(env)}
+                    isLoading={isPending}
+                    disabled={pendingKey !== null && !isPending}
+                  >
+                    {env.IsManaged ? 'Unmanage' : 'Manage'}
+                  </Button>
                 </div>
               </div>
-              <StatusBadge status="healthy" label="✓ 正常" />
-            </div>
-            <p className="text-xs text-slate-400 mb-4 h-8 overflow-hidden line-clamp-2">{env.Description}</p>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-500">{env.Website}</span>
-              <div className="flex gap-2">
-                <span className={`text-xs px-2 py-1 rounded-md ${env.IsManaged ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                  {env.IsManaged ? '已管理' : '未管理'}
-                </span>
-              </div>
-            </div>
-          </SurfaceCard>
-        ))}
+            </SurfaceCard>
+          );
+        })}
       </div>
 
       {filtered.length === 0 && (
-        <EmptyState 
+        <EmptyState
           icon={<SearchIcon className="w-6 h-6" />}
-          title="未找到环境"
-          description={search ? '尝试其他关键词搜索' : '暂无已扫描的环境数据'}
+          title="No environments found"
+          description={search ? 'Try another search term.' : 'No scanned environment data is available.'}
         />
       )}
     </div>

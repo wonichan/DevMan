@@ -19,8 +19,12 @@ export function GetMetricSnapshots(arg1:string,arg2:string,arg3:number):Promise<
 
 export function GetSettings():Promise<models.AppSettings>;
 
+export function ManageEnv(arg1:string):Promise<models.Env>;
+
 export function Migrate(arg1:number,arg2:string,arg3:boolean):Promise<migrator.MigrationResult>;
 
 export function SaveSettings(arg1:models.AppSettings):Promise<void>;
 
 export function ScanAll():Promise<Array<models.EnvSummary>>;
+
+export function UnmanageEnv(arg1:string):Promise<models.Env>;
