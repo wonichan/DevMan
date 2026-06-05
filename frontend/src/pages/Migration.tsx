@@ -5,8 +5,10 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
 import { ProgressBar } from '../components/ui/ProgressBar';
+import { ManagementBadge } from '../components/ui/ManagementBadge';
 import { useToast } from '../hooks/useToast';
 import { useConfirm } from '../hooks/useConfirm';
+import { sortEnvSummariesByManagement } from '../utils/environment-management';
 import { 
   CheckIcon, 
   CloseIcon, 
@@ -24,15 +26,6 @@ function formatBytes(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-function sortMigrationCandidates(list: EnvSummary[]): EnvSummary[] {
-  return [...list].sort((a, b) => {
-    if (a.Env.IsManaged !== b.Env.IsManaged) {
-      return a.Env.IsManaged ? -1 : 1;
-    }
-    return a.Env.Name.localeCompare(b.Env.Name);
-  });
 }
 
 export default function Migration() {
@@ -85,7 +78,7 @@ export default function Migration() {
         const s = await GetEnvSummary(e.Key);
         if (s) summaries.push(s);
       }
-      setEnvs(sortMigrationCandidates(summaries));
+      setEnvs(sortEnvSummariesByManagement(summaries));
     } catch (e: unknown) {
       error('加载环境失败', e instanceof Error ? e.message : String(e));
     }
@@ -213,11 +206,7 @@ export default function Migration() {
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
-                    <span className={`text-xs px-2 py-0.5 rounded-md ${
-                      env.Env.IsManaged ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
-                    }`}>
-                      {env.Env.IsManaged ? 'Managed' : 'Unmanaged'}
-                    </span>
+                    <ManagementBadge managed={env.Env.IsManaged} />
                     <span className="text-sm font-mono text-cyan-400 bg-cyan-400/10 px-2 py-1 rounded-md">
                       {formatBytes(env.TotalSize)}
                     </span>

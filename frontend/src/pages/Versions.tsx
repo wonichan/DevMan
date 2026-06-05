@@ -3,19 +3,12 @@ import { GetEnvs, GetEnvSummary } from '../api/app';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { ManagementBadge } from '../components/ui/ManagementBadge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { SearchIcon } from '../components/icons';
 import { useToast } from '../hooks/useToast';
 import type { EnvSummary } from '../devman-types';
-
-function sortSummaries(list: EnvSummary[]): EnvSummary[] {
-  return [...list].sort((a, b) => {
-    if (a.Env.IsManaged !== b.Env.IsManaged) {
-      return a.Env.IsManaged ? -1 : 1;
-    }
-    return a.Env.Name.localeCompare(b.Env.Name);
-  });
-}
+import { sortEnvSummariesByManagement } from '../utils/environment-management';
 
 export default function Versions() {
   const [envs, setEnvs] = useState<EnvSummary[]>([]);
@@ -31,7 +24,7 @@ export default function Versions() {
         const s = await GetEnvSummary(e.Key);
         if (s) summaries.push(s);
       }
-      setEnvs(sortSummaries(summaries));
+      setEnvs(sortEnvSummariesByManagement(summaries));
     } catch (e: unknown) {
       error('加载失败', e instanceof Error ? e.message : String(e));
     }
@@ -61,11 +54,7 @@ export default function Versions() {
             </div>
 
             <div className="mb-4">
-              <span className={`text-xs px-2 py-0.5 rounded-md ${
-                env.Env.IsManaged ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
-              }`}>
-                {env.Env.IsManaged ? 'Managed' : 'Unmanaged'}
-              </span>
+              <ManagementBadge managed={env.Env.IsManaged} />
             </div>
 
             <div className="space-y-2">

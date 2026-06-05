@@ -5,11 +5,13 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { ManagementBadge } from '../components/ui/ManagementBadge';
 import { ProgressBar } from '../components/ui/ProgressBar';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useToast } from '../hooks/useToast';
 import { usePageActions } from '../hooks/usePageActions';
 import { RefreshIcon, CheckIcon, WarningIcon, InfoIcon, DashboardIcon, TrendingUpIcon } from '../components/icons';
+import { sortEnvSummariesByManagement } from '../utils/environment-management';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -38,15 +40,6 @@ function buildTrendData(snapshots: MetricSnapshot[]): TrendPoint[] {
     .map((s) => ({ label: formatTrendLabel(s.CapturedAt), value: s.ValueBytes || 0 }))
     .reverse();
   return points.slice(-10);
-}
-
-function sortSummaries(list: EnvSummary[]): EnvSummary[] {
-  return [...list].sort((a, b) => {
-    if (a.Env.IsManaged !== b.Env.IsManaged) {
-      return a.Env.IsManaged ? -1 : 1;
-    }
-    return a.Env.Name.localeCompare(b.Env.Name);
-  });
 }
 
 function TrendChart({ data }: { data: TrendPoint[] }) {
@@ -95,14 +88,14 @@ export default function Dashboard() {
   const loadStoredSummaries = async (): Promise<EnvSummary[]> => {
     const envs = await GetEnvs();
     const summaries = await Promise.all((envs || []).map((env) => GetEnvSummary(env.Key)));
-    return sortSummaries(summaries.filter((summary): summary is EnvSummary => Boolean(summary)));
+    return sortEnvSummariesByManagement(summaries.filter((summary): summary is EnvSummary => Boolean(summary)));
   };
 
   const load = async (refresh = true) => {
     setLoading(true);
     try {
       const s = refresh ? await ScanAll() : await loadStoredSummaries();
-      setSummaries(sortSummaries(s || []));
+      setSummaries(sortEnvSummariesByManagement(s || []));
       const d = await GetDiskInfo();
       setDisks(d || []);
       if (refresh) {
@@ -132,7 +125,7 @@ export default function Dashboard() {
       try {
         const settings = await GetSettings();
         const s = settings.AutoScanOnStartup ? await ScanAll() : await loadStoredSummaries();
-        setSummaries(sortSummaries(s || []));
+        setSummaries(sortEnvSummariesByManagement(s || []));
         const d = await GetDiskInfo();
         setDisks(d || []);
       } catch (e: unknown) {
@@ -292,11 +285,7 @@ export default function Dashboard() {
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <StatusBadge status={summary.Health === 'healthy' ? 'healthy' : 'warning'} label={summary.Health === 'healthy' ? '正常' : '需关注'} />
-                  <span className={`text-xs px-2 py-0.5 rounded-md ${
-                    summary.Env.IsManaged ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
-                  }`}>
-                    {summary.Env.IsManaged ? 'Managed' : 'Unmanaged'}
-                  </span>
+                  <ManagementBadge managed={summary.Env.IsManaged} />
                 </div>
               </div>
               <div className="space-y-2">

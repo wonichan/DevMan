@@ -4,11 +4,17 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
+import { ManagementBadge } from '../components/ui/ManagementBadge';
 import { useConfirm } from '../hooks/useConfirm';
 import { useToast } from '../hooks/useToast';
 import { usePageActions } from '../hooks/usePageActions';
 import { SearchIcon, TrashIcon, WarningIcon } from '../components/icons';
 import type { CleanableItem } from '../devman-types';
+import {
+  buildManagedLookup,
+  sortCleanableItemsByManagement,
+  type ManagedLookup,
+} from '../utils/environment-management';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -36,17 +42,6 @@ function riskLabel(level: string): string {
   }
 }
 
-type ManagedLookup = Record<string, boolean>;
-
-function sortCleanableItems(items: CleanableItem[], managedByKey: ManagedLookup): CleanableItem[] {
-  return [...items].sort((a, b) => {
-    const aManaged = Boolean(managedByKey[a.EnvKey]);
-    const bManaged = Boolean(managedByKey[b.EnvKey]);
-    if (aManaged !== bManaged) return aManaged ? -1 : 1;
-    return a.Name.localeCompare(b.Name);
-  });
-}
-
 export default function Cleaner() {
   const [items, setItems] = useState<CleanableItem[]>([]);
   const [managedByKey, setManagedByKey] = useState<ManagedLookup>({});
@@ -60,13 +55,13 @@ export default function Cleaner() {
     setScanning(true);
     try {
       const [data, envs] = await Promise.all([AnalyzeCleanable(), GetEnvs()]);
-      const managedLookup = Object.fromEntries((envs || []).map((env) => [env.Key, env.IsManaged]));
+      const managedLookup = buildManagedLookup(envs || []);
       const normalized = (data || []).map((item) => ({
         ...item,
         Selected: item.Category === 'cache' ? true : item.Selected,
       }));
       setManagedByKey(managedLookup);
-      setItems(sortCleanableItems(normalized, managedLookup));
+      setItems(sortCleanableItemsByManagement(normalized, managedLookup));
       toast.success('分析完成', `找到 ${normalized.length} 个可清理项`);
     } catch (e: unknown) {
       toast.error('分析失败', e instanceof Error ? e.message : String(e));
@@ -190,11 +185,7 @@ export default function Cleaner() {
                 <span className="text-xs px-2 py-0.5 rounded bg-[#0f172a] border border-[#334155] text-slate-400">
                   {item.Category}
                 </span>
-                <span className={`text-xs px-2 py-0.5 rounded ${
-                  managedByKey[item.EnvKey] ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
-                }`}>
-                  {managedByKey[item.EnvKey] ? 'Managed' : 'Unmanaged'}
-                </span>
+                <ManagementBadge managed={Boolean(managedByKey[item.EnvKey])} />
               </div>
               <p className="text-xs text-slate-400 truncate mt-0.5 font-mono">{item.Path}</p>
               <p className="text-xs text-slate-500 mt-1">{item.Description}</p>

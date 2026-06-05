@@ -5,6 +5,7 @@ import { SurfaceCard } from '../components/ui/SurfaceCard';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { ManagementBadge } from '../components/ui/ManagementBadge';
 import { RefreshIcon, SearchIcon } from '../components/icons';
 import { useToast } from '../hooks/useToast';
 import type { Env } from '../devman-types';
@@ -94,13 +95,7 @@ export default function Environments() {
               <div className="flex items-center justify-between gap-4">
                 <span className="text-xs text-slate-500 truncate">{env.Website}</span>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span
-                    className={`min-w-[86px] text-center text-xs px-2 py-1 rounded-md ${
-                      env.IsManaged ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
-                    }`}
-                  >
-                    {env.IsManaged ? 'Managed' : 'Unmanaged'}
-                  </span>
+                  <ManagementBadge managed={env.IsManaged} className="min-w-[86px] text-center py-1" />
                   <Button
                     size="sm"
                     variant={env.IsManaged ? 'ghost' : 'secondary'}
