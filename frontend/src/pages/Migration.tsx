@@ -26,6 +26,15 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+function sortMigrationCandidates(list: EnvSummary[]): EnvSummary[] {
+  return [...list].sort((a, b) => {
+    if (a.Env.IsManaged !== b.Env.IsManaged) {
+      return a.Env.IsManaged ? -1 : 1;
+    }
+    return a.Env.Name.localeCompare(b.Env.Name);
+  });
+}
+
 export default function Migration() {
   const [step, setStep] = useState(1);
   const [envs, setEnvs] = useState<EnvSummary[]>([]);
@@ -76,7 +85,7 @@ export default function Migration() {
         const s = await GetEnvSummary(e.Key);
         if (s) summaries.push(s);
       }
-      setEnvs(summaries);
+      setEnvs(sortMigrationCandidates(summaries));
     } catch (e: unknown) {
       error('加载环境失败', e instanceof Error ? e.message : String(e));
     }
@@ -203,9 +212,16 @@ export default function Migration() {
                       {env.Instances[0]?.InstallPath || '未知路径'}
                     </p>
                   </div>
-                  <span className="text-sm font-mono text-cyan-400 bg-cyan-400/10 px-2 py-1 rounded-md">
-                    {formatBytes(env.TotalSize)}
-                  </span>
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <span className={`text-xs px-2 py-0.5 rounded-md ${
+                      env.Env.IsManaged ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
+                    }`}>
+                      {env.Env.IsManaged ? 'Managed' : 'Unmanaged'}
+                    </span>
+                    <span className="text-sm font-mono text-cyan-400 bg-cyan-400/10 px-2 py-1 rounded-md">
+                      {formatBytes(env.TotalSize)}
+                    </span>
+                  </div>
                 </div>
               </SurfaceCard>
             ))}
@@ -368,6 +384,15 @@ export default function Migration() {
               </div>
             </div>
           </SurfaceCard>
+
+          {!selectedEnv.Env.IsManaged && (
+            <div className="bg-slate-500/10 border border-slate-500/20 rounded-xl p-4 mb-6 flex gap-3 items-start">
+              <InfoIcon className="w-5 h-5 text-slate-300 shrink-0 mt-0.5" />
+              <p className="text-sm text-slate-300/90 leading-relaxed">
+                <strong>Unmanaged environment.</strong> Migration is still allowed, but DevMan has not been explicitly approved to track this environment yet.
+              </p>
+            </div>
+          )}
 
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 mb-8 flex gap-3 items-start">
             <WarningIcon className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
