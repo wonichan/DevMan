@@ -4,6 +4,7 @@ import (
 	"devman/internal/models"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -100,25 +101,39 @@ func (s *PythonScanner) Name() string { return "Python" }
 func (s *PythonScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error) {
 	var instances []models.EnvInstance
 	var paths []models.EnvPath
+	seen := map[string]bool{}
 
 	names := []string{"python", "python3", "py"}
 	for _, name := range names {
 		exe := FindExecutableInPath(name)
-		if exe != "" {
-			installDir := filepath.Dir(exe)
-			// On Windows, Python is usually in C:\Python3xx or exe is in Scripts subdir
-			if strings.Contains(strings.ToLower(installDir), "scripts") {
-				installDir = filepath.Dir(installDir)
-			}
-			instances = append(instances, models.EnvInstance{
-				Version:     ExecutableVersion(exe, "--version"),
-				InstallPath: installDir,
-				IsDefault:   name == "python",
-				IsActive:    true,
-				Source:      "system",
-			})
-			paths = append(paths, models.EnvPath{Type: models.PathInstall, Path: installDir, IsMovable: true})
+		if exe == "" || isWindowsAppsAlias(exe) {
+			continue
 		}
+		version := ExecutableVersion(exe, "--version")
+		if version == "unknown" && name == "py" {
+			version = ExecutableVersion(exe, "-V")
+		}
+		if version == "unknown" {
+			continue
+		}
+		installDir := filepath.Dir(exe)
+		// On Windows, Python is usually in C:\Python3xx or exe is in Scripts subdir.
+		if strings.Contains(strings.ToLower(installDir), "scripts") {
+			installDir = filepath.Dir(installDir)
+		}
+		key := strings.ToLower(installDir)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		instances = append(instances, models.EnvInstance{
+			Version:     version,
+			InstallPath: installDir,
+			IsDefault:   name == "python",
+			IsActive:    true,
+			Source:      "system",
+		})
+		paths = append(paths, models.EnvPath{Type: models.PathInstall, Path: installDir, IsMovable: true})
 	}
 
 	if len(instances) == 0 {
@@ -153,6 +168,13 @@ func (s *PythonScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error)
 	}
 
 	return instances, paths, nil
+}
+
+func isWindowsAppsAlias(path string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(path), `\microsoft\windowsapps\`)
 }
 
 type JavaScanner struct{}
@@ -268,7 +290,7 @@ func (s *FlutterScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error
 			installDir = filepath.Dir(installDir)
 		}
 		instances = append(instances, models.EnvInstance{
-			Version:     ExecutableVersion(exe, "--version"),
+			Version:     flutterVersion(installDir, exe),
 			InstallPath: installDir,
 			IsDefault:   true,
 			IsActive:    true,
@@ -281,7 +303,7 @@ func (s *FlutterScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error
 			c := filepath.Join(base, "flutter")
 			if IsDir(c) {
 				instances = append(instances, models.EnvInstance{
-					Version:     filepath.Base(c),
+					Version:     flutterVersion(c, ""),
 					InstallPath: c,
 					IsDefault:   true,
 					IsActive:    false,
@@ -302,6 +324,22 @@ func (s *FlutterScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error
 	}
 
 	return instances, paths, nil
+}
+
+func flutterVersion(installDir, exe string) string {
+	versionFile := filepath.Join(installDir, "version")
+	if lines, err := ReadFileLines(versionFile); err == nil {
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				return line
+			}
+		}
+	}
+	if exe != "" {
+		return ExecutableVersion(exe, "--version")
+	}
+	return "unknown"
 }
 
 type RustScanner struct{}

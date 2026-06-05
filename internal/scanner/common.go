@@ -85,9 +85,14 @@ func FindExecutableInPath(name string) string {
 	for _, dir := range GetEnvPaths() {
 		full := filepath.Join(dir, name)
 		if runtime.GOOS == "windows" {
-			for _, ext := range []string{"", ".exe", ".cmd", ".bat"} {
-				if PathExists(full + ext) {
-					return full + ext
+			exts := []string{".exe", ".cmd", ".bat", ""}
+			if filepath.Ext(name) != "" {
+				exts = []string{""}
+			}
+			for _, ext := range exts {
+				candidate := full + ext
+				if PathExists(candidate) {
+					return candidate
 				}
 			}
 		} else {

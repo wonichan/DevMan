@@ -3,6 +3,7 @@ package scanner
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -68,5 +69,49 @@ func TestFindExecutableInPath(t *testing.T) {
 		t.Log("go not found in PATH (expected in some environments)")
 	} else {
 		t.Logf("found go at: %s", exe)
+	}
+}
+
+func TestFindExecutableInPathPrefersWindowsScriptExtension(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows PATH extension order only applies on Windows")
+	}
+	tmpDir := t.TempDir()
+	name := "devman-test-tool"
+	extensionless := filepath.Join(tmpDir, name)
+	bat := filepath.Join(tmpDir, name+".bat")
+	if err := os.WriteFile(extensionless, []byte("extensionless"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bat, []byte("@echo off\r\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", tmpDir)
+	found := FindExecutableInPath(name)
+	if found != bat {
+		t.Fatalf("expected %s, got %s", bat, found)
+	}
+}
+
+func TestFlutterVersionReadsSdkVersionFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "version"), []byte("3.35.7\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := flutterVersion(tmpDir, "")
+	if got != "3.35.7" {
+		t.Fatalf("expected Flutter version from SDK version file, got %q", got)
+	}
+}
+
+func TestIsWindowsAppsAlias(t *testing.T) {
+	got := isWindowsAppsAlias(`C:\Users\Administrator\AppData\Local\Microsoft\WindowsApps\python3.exe`)
+	if runtime.GOOS == "windows" && !got {
+		t.Fatal("expected WindowsApps alias to be detected on Windows")
+	}
+	if runtime.GOOS != "windows" && got {
+		t.Fatal("WindowsApps alias should only be detected on Windows")
 	}
 }
