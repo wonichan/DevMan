@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"database/sql"
 	"devman/internal/models"
 	"path/filepath"
 	"testing"
@@ -26,6 +27,61 @@ func setupTestDB(t *testing.T) (*Registry, func()) {
 func TestOpenAndMigrate(t *testing.T) {
 	_, cleanup := setupTestDB(t)
 	defer cleanup()
+}
+
+func TestOpenMigratesOldEnvSchema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "devman.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite db failed: %v", err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE envs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    key TEXT UNIQUE NOT NULL,
+    category TEXT,
+    icon TEXT,
+    description TEXT,
+    website TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO envs (name, key, category, icon, description, website) VALUES ('Go', 'go', 'runtime', '', 'Go toolchain', 'https://go.dev');
+`); err != nil {
+		t.Fatalf("create old schema failed: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close old schema db failed: %v", err)
+	}
+
+	DbPathOverride = dbPath
+	reg, err := Open()
+	if err != nil {
+		t.Fatalf("open migrated registry failed: %v", err)
+	}
+	defer func() {
+		reg.Close()
+		DbPathOverride = ""
+	}()
+
+	env, err := reg.GetEnvByKey("go")
+	if err != nil {
+		t.Fatalf("get migrated env failed: %v", err)
+	}
+	if env == nil {
+		t.Fatal("expected old schema env to remain available")
+	}
+	if env.IsManaged {
+		t.Fatal("old schema env should default to unmanaged")
+	}
+	managed, err := reg.SetEnvManaged("go", true)
+	if err != nil {
+		t.Fatalf("set migrated env managed failed: %v", err)
+	}
+	if !managed.IsManaged {
+		t.Fatal("expected migrated env to be manageable")
+	}
 }
 
 func TestSaveAndGetEnv(t *testing.T) {
@@ -156,6 +212,9 @@ func TestSaveEnvPreservesManagedStateOnConflict(t *testing.T) {
 	}
 	if err := reg.SaveEnv(scanned); err != nil {
 		t.Fatalf("save scanner env failed: %v", err)
+	}
+	if !scanned.IsManaged {
+		t.Fatal("save env should reload preserved managed state into the input env")
 	}
 
 	fetched, err := reg.GetEnvByKey("go")

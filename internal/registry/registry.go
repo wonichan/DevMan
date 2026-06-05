@@ -148,8 +148,45 @@ CREATE INDEX IF NOT EXISTS idx_metrics_captured ON metric_snapshots(captured_at)
 		logrus.WithError(err).Error("registry schema migration failed")
 		return err
 	}
+	if err := r.ensureEnvColumns(); err != nil {
+		logrus.WithError(err).Error("registry env column migration failed")
+		return err
+	}
 	logrus.Info("registry schema migration complete")
 	return err
+}
+
+func (r *Registry) ensureEnvColumns() error {
+	hasManaged, err := r.hasColumn("envs", "is_managed")
+	if err != nil {
+		return err
+	}
+	if hasManaged {
+		return nil
+	}
+	_, err = r.db.Exec(`ALTER TABLE envs ADD COLUMN is_managed INTEGER DEFAULT 0`)
+	return err
+}
+
+func (r *Registry) hasColumn(table string, column string) (bool, error) {
+	rows, err := r.db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func (r *Registry) SaveEnv(env *models.Env) error {
@@ -173,10 +210,15 @@ func (r *Registry) SaveEnv(env *models.Env) error {
 		logrus.WithError(err).WithField("env_key", env.Key).Error("failed to save environment")
 		return err
 	}
-	if err := r.db.QueryRow(`SELECT id FROM envs WHERE key = ?`, env.Key).Scan(&env.ID); err != nil {
-		logrus.WithError(err).WithField("env_key", env.Key).Error("failed to reload saved environment id")
+	saved, err := r.GetEnvByKey(env.Key)
+	if err != nil {
+		logrus.WithError(err).WithField("env_key", env.Key).Error("failed to reload saved environment")
 		return err
 	}
+	if saved == nil {
+		return fmt.Errorf("env not found after save: %s", env.Key)
+	}
+	*env = *saved
 	return nil
 }
 
