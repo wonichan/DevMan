@@ -415,3 +415,75 @@ func TestResolverRejectsVersionsEndingInSeparator(t *testing.T) {
 		})
 	}
 }
+
+func TestResolverRejectsGenericPathBinOrCmdParent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		toolKey string
+		command string
+		path    string
+		parent  string
+		version string
+	}{
+		{
+			name:    "go in generic dev bin",
+			toolKey: "go",
+			command: "go",
+			path:    `C:\dev\bin\go.exe`,
+			parent:  `C:\dev`,
+			version: "1.25.0",
+		},
+		{
+			name:    "bun in generic tools cmd",
+			toolKey: "bun",
+			command: "bun",
+			path:    `D:\tools\cmd\bun.exe`,
+			parent:  `D:\tools`,
+			version: "1.2.0",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newFakeEnvironment()
+			env.paths[tc.command] = tc.path
+			env.dirs[tc.parent] = true
+
+			_, err := ResolveInstallRoot(env, tc.toolKey, tc.version)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), "cannot infer install root") {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
+
+func TestResolverDriveRootEnvRootFallsThroughToPath(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `C:\`
+	env.paths["go"] = `D:\production\go1.26\bin\go.exe`
+	env.dirs[`C:\`] = true
+	env.dirs[`D:\production\go1.26`] = true
+
+	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err != nil {
+		t.Fatalf("ResolveInstallRoot failed: %v", err)
+	}
+	if plan.TargetDir != `D:\production\go1.25.0` {
+		t.Fatalf("TargetDir = %q", plan.TargetDir)
+	}
+}
+
+func TestResolverDriveRootEnvRootWithoutPathReturnsCannotInfer(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `C:\`
+	env.dirs[`C:\`] = true
+
+	_, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot infer install root") {
+		t.Fatalf("error = %q", err)
+	}
+}

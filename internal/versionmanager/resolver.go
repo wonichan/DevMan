@@ -26,7 +26,7 @@ func ResolveInstallRoot(env Environment, toolKey string, version string) (*Versi
 	}
 
 	if exe := env.LookPath(strings.TrimSuffix(tool.PrimaryExe, filepath.Ext(tool.PrimaryExe))); exe != "" {
-		if root, ok := rootFromPathExecutable(exe); ok {
+		if root, ok := rootFromPathExecutable(tool, exe); ok {
 			if plan := planFromExistingRoot(env, tool, version, root, fmt.Sprintf("based on PATH executable %s", exe)); plan != nil {
 				return plan, nil
 			}
@@ -36,16 +36,35 @@ func ResolveInstallRoot(env Environment, toolKey string, version string) (*Versi
 	return nil, fmt.Errorf("cannot infer install root for %s", toolKey)
 }
 
-func rootFromPathExecutable(exe string) (string, bool) {
+func rootFromPathExecutable(tool ToolDefinition, exe string) (string, bool) {
 	root := filepath.Dir(exe)
 	if strings.EqualFold(filepath.Base(root), "bin") || strings.EqualFold(filepath.Base(root), "cmd") {
 		parent := filepath.Dir(root)
 		if filepath.Dir(parent) == parent {
 			return "", false
 		}
+		if !isPlausibleToolRoot(tool, parent) {
+			return "", false
+		}
 		root = parent
 	}
 	return root, true
+}
+
+func isPlausibleToolRoot(tool ToolDefinition, root string) bool {
+	base := strings.ToLower(filepath.Base(root))
+	switch tool.Key {
+	case "go":
+		return strings.HasPrefix(base, "go")
+	case "node":
+		return base == "node" || base == "nodejs" || strings.HasPrefix(base, "node-") || strings.HasPrefix(base, "node-v")
+	case "bun":
+		return base == "bun" || base == ".bun" || strings.HasPrefix(base, "bun-") || strings.HasPrefix(base, "bun-v")
+	case "flutter":
+		return base == "flutter" || strings.HasPrefix(base, "flutter-")
+	default:
+		return false
+	}
 }
 
 func planFromExistingRoot(env Environment, tool ToolDefinition, version string, existingRoot string, reason string) *VersionInstallPlan {
@@ -79,6 +98,9 @@ func normalizeExistingRoot(existingRoot string) (string, bool) {
 		return "", false
 	}
 	if !filepath.IsAbs(clean) {
+		return "", false
+	}
+	if filepath.Dir(clean) == clean {
 		return "", false
 	}
 	return clean, true
