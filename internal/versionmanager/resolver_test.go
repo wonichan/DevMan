@@ -1,3 +1,5 @@
+//go:build windows
+
 package versionmanager
 
 import (
@@ -485,5 +487,33 @@ func TestResolverDriveRootEnvRootWithoutPathReturnsCannotInfer(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot infer install root") {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestResolverRejectsGenericDirectPathRoot(t *testing.T) {
+	env := newFakeEnvironment()
+	env.paths["go"] = `D:\tools\go.exe`
+	env.dirs[`D:\tools`] = true
+
+	_, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot infer install root") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestNodeResolverUsesPlausibleDirectPathRoot(t *testing.T) {
+	env := newFakeEnvironment()
+	env.paths["node"] = `D:\production\nodejs\node.exe`
+	env.dirs[`D:\production\nodejs`] = true
+
+	plan, err := ResolveInstallRoot(env, "node", "22.11.0")
+	if err != nil {
+		t.Fatalf("ResolveInstallRoot failed: %v", err)
+	}
+	if plan.TargetDir != `D:\production\node-v22.11.0` {
+		t.Fatalf("TargetDir = %q", plan.TargetDir)
 	}
 }

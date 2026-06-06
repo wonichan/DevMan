@@ -43,10 +43,10 @@ func rootFromPathExecutable(tool ToolDefinition, exe string) (string, bool) {
 		if filepath.Dir(parent) == parent {
 			return "", false
 		}
-		if !isPlausibleToolRoot(tool, parent) {
-			return "", false
-		}
 		root = parent
+	}
+	if !isPlausibleToolRoot(tool, root) {
+		return "", false
 	}
 	return root, true
 }
