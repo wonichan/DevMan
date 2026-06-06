@@ -80,7 +80,20 @@ func isPlausibleToolRoot(tool ToolDefinition, root string) bool {
 }
 
 func isVersionLike(version string) bool {
-	return isSafeVersion(version) && strings.Contains(version, ".")
+	if !isSafeVersion(version) || !strings.Contains(version, ".") {
+		return false
+	}
+	for _, part := range strings.Split(version, ".") {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func planFromExistingRoot(env Environment, tool ToolDefinition, version string, existingRoot string, reason string) *VersionInstallPlan {

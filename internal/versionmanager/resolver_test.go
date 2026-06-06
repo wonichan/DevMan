@@ -609,6 +609,28 @@ func TestResolverRejectsGenericGoToolsEnvRootWithoutPath(t *testing.T) {
 	}
 }
 
+func TestResolverRejectsNonVersionGoRootNames(t *testing.T) {
+	for _, root := range []string{
+		`D:\tools\go1.cache`,
+		`D:\tools\go-1.tmp`,
+		`D:\tools\go1.dev`,
+	} {
+		t.Run(root, func(t *testing.T) {
+			env := newFakeEnvironment()
+			env.vars["GOROOT"] = root
+			env.dirs[root] = true
+
+			_, err := ResolveInstallRoot(env, "go", "1.25.0")
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), "cannot infer install root") {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
+
 func TestGoResolverRejectsDirectRootPathExecutable(t *testing.T) {
 	env := newFakeEnvironment()
 	env.paths["go"] = `D:\production\go\go.exe`
