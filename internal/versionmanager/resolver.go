@@ -38,6 +38,9 @@ func ResolveInstallRoot(env Environment, toolKey string, version string) (*Versi
 
 func rootFromPathExecutable(tool ToolDefinition, exe string) (string, bool) {
 	root := filepath.Dir(exe)
+	if tool.BinSubdir != "" && !strings.EqualFold(filepath.Base(root), tool.BinSubdir) {
+		return "", false
+	}
 	if strings.EqualFold(filepath.Base(root), "bin") || strings.EqualFold(filepath.Base(root), "cmd") {
 		parent := filepath.Dir(root)
 		if filepath.Dir(parent) == parent {
@@ -55,7 +58,16 @@ func isPlausibleToolRoot(tool ToolDefinition, root string) bool {
 	base := strings.ToLower(filepath.Base(root))
 	switch tool.Key {
 	case "go":
-		return base == "go" || strings.HasPrefix(base, "go1") || strings.HasPrefix(base, "go-")
+		if base == "go" {
+			return true
+		}
+		if strings.HasPrefix(base, "go-") {
+			return isVersionLike(base[3:])
+		}
+		if strings.HasPrefix(base, "go") {
+			return isVersionLike(base[2:])
+		}
+		return false
 	case "node":
 		return base == "node" || base == "nodejs" || strings.HasPrefix(base, "node-") || strings.HasPrefix(base, "node-v")
 	case "bun":
@@ -65,6 +77,10 @@ func isPlausibleToolRoot(tool ToolDefinition, root string) bool {
 	default:
 		return false
 	}
+}
+
+func isVersionLike(version string) bool {
+	return isSafeVersion(version) && strings.Contains(version, ".")
 }
 
 func planFromExistingRoot(env Environment, tool ToolDefinition, version string, existingRoot string, reason string) *VersionInstallPlan {

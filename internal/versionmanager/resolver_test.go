@@ -578,3 +578,75 @@ func TestResolverRejectsBroadGoLikePathRoot(t *testing.T) {
 		t.Fatalf("error = %q", err)
 	}
 }
+
+func TestResolverRejectsGenericGoCacheEnvRootAndFallsThrough(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\tools\go-cache`
+	env.paths["go"] = `D:\production\go1.26\bin\go.exe`
+	env.dirs[`D:\tools\go-cache`] = true
+	env.dirs[`D:\production\go1.26`] = true
+
+	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err != nil {
+		t.Fatalf("ResolveInstallRoot failed: %v", err)
+	}
+	if plan.TargetDir != `D:\production\go1.25.0` {
+		t.Fatalf("TargetDir = %q", plan.TargetDir)
+	}
+}
+
+func TestResolverRejectsGenericGoToolsEnvRootWithoutPath(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\tools\go-tools`
+	env.dirs[`D:\tools\go-tools`] = true
+
+	_, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot infer install root") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestGoResolverRejectsDirectRootPathExecutable(t *testing.T) {
+	env := newFakeEnvironment()
+	env.paths["go"] = `D:\production\go\go.exe`
+	env.dirs[`D:\production\go`] = true
+
+	_, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot infer install root") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestGoResolverAcceptsBinPathUnderGoRoot(t *testing.T) {
+	env := newFakeEnvironment()
+	env.paths["go"] = `D:\production\go\bin\go.exe`
+	env.dirs[`D:\production\go`] = true
+
+	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err != nil {
+		t.Fatalf("ResolveInstallRoot failed: %v", err)
+	}
+	if plan.TargetDir != `D:\production\go1.25.0` {
+		t.Fatalf("TargetDir = %q", plan.TargetDir)
+	}
+}
+
+func TestFlutterResolverRejectsDirectRootPathExecutable(t *testing.T) {
+	env := newFakeEnvironment()
+	env.paths["flutter"] = `D:\tools\flutter\flutter.bat`
+	env.dirs[`D:\tools\flutter`] = true
+
+	_, err := ResolveInstallRoot(env, "flutter", "3.24.5")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot infer install root") {
+		t.Fatalf("error = %q", err)
+	}
+}
