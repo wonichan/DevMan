@@ -3,6 +3,7 @@ package registry
 import (
 	"database/sql"
 	"devman/internal/models"
+	"devman/internal/versionmanager"
 	"path/filepath"
 	"testing"
 	"time"
@@ -655,5 +656,57 @@ func TestPruneMetricSnapshots(t *testing.T) {
 	}
 	if len(snapshots) != 3 {
 		t.Errorf("expected 3 snapshots after prune, got %d", len(snapshots))
+	}
+}
+
+func TestVersionManagementTablesPersistRecords(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	version := &versionmanager.ManagedVersion{
+		ToolKey:      "go",
+		Version:      "1.26.0",
+		InstallPath:  `D:\production\go1.26`,
+		BinPath:      `D:\production\go1.26\bin\go.exe`,
+		Source:       versionmanager.SourceDevMan,
+		IsDefault:    true,
+		IsActive:     true,
+		CanDelete:    true,
+		DeletePolicy: versionmanager.DeletePolicyDirect,
+		DetectedAt:   time.Now(),
+	}
+	if err := reg.SaveToolVersion(version); err != nil {
+		t.Fatalf("SaveToolVersion failed: %v", err)
+	}
+	if version.ID == 0 {
+		t.Fatal("expected SaveToolVersion to assign ID")
+	}
+
+	versions, err := reg.ListToolVersions("go")
+	if err != nil {
+		t.Fatalf("ListToolVersions failed: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("expected 1 version, got %#v", versions)
+	}
+	if versions[0].ToolKey != "go" || versions[0].Version != "1.26.0" {
+		t.Fatalf("unexpected version: %#v", versions[0])
+	}
+
+	strategy := versionmanager.InstallStrategy{
+		ToolKey:   "go",
+		RootDir:   `D:\production`,
+		Reason:    "confirmed by user",
+		UpdatedAt: time.Now(),
+	}
+	if err := reg.SaveInstallStrategy(strategy); err != nil {
+		t.Fatalf("SaveInstallStrategy failed: %v", err)
+	}
+	gotStrategy, err := reg.GetInstallStrategy("go")
+	if err != nil {
+		t.Fatalf("GetInstallStrategy failed: %v", err)
+	}
+	if gotStrategy == nil || gotStrategy.RootDir != `D:\production` {
+		t.Fatalf("unexpected strategy: %#v", gotStrategy)
 	}
 }

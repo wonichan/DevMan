@@ -49,6 +49,13 @@ type ManagedVersion struct {
 	DetectedAt   time.Time     `json:"DetectedAt"`
 }
 
+type InstallStrategy struct {
+	ToolKey   string    `json:"ToolKey"`
+	RootDir   string    `json:"RootDir"`
+	Reason    string    `json:"Reason"`
+	UpdatedAt time.Time `json:"UpdatedAt"`
+}
+
 type VersionInstallPlan struct {
 	ToolKey            string            `json:"ToolKey"`
 	Version            string            `json:"Version"`

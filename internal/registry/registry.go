@@ -3,6 +3,7 @@ package registry
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"devman/internal/models"
+	"devman/internal/versionmanager"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/sirupsen/logrus"
@@ -142,6 +144,41 @@ CREATE TABLE IF NOT EXISTS metric_snapshots (
 CREATE INDEX IF NOT EXISTS idx_metrics_key ON metric_snapshots(metric_key);
 CREATE INDEX IF NOT EXISTS idx_metrics_target ON metric_snapshots(metric_key, target_key);
 CREATE INDEX IF NOT EXISTS idx_metrics_captured ON metric_snapshots(captured_at);
+
+CREATE TABLE IF NOT EXISTS tool_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_key TEXT NOT NULL,
+    version TEXT NOT NULL,
+    install_path TEXT NOT NULL,
+    bin_path TEXT,
+    source TEXT NOT NULL,
+    is_default INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 0,
+    can_delete INTEGER DEFAULT 0,
+    delete_policy TEXT,
+    detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tool_key, install_path)
+);
+
+CREATE TABLE IF NOT EXISTS version_install_strategies (
+    tool_key TEXT PRIMARY KEY,
+    root_dir TEXT NOT NULL,
+    reason TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS version_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_key TEXT NOT NULL,
+    version TEXT,
+    operation TEXT NOT NULL,
+    success INTEGER DEFAULT 0,
+    message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_versions_tool ON tool_versions(tool_key);
+CREATE INDEX IF NOT EXISTS idx_version_operations_tool ON version_operations(tool_key);
 `
 	_, err := r.db.Exec(schema)
 	if err != nil {
@@ -568,6 +605,107 @@ func (r *Registry) PruneMetricSnapshots(metricKey string, keepCount int) error {
 		logrus.WithError(err).WithField("metric_key", metricKey).Error("failed to prune metric snapshots")
 	}
 	return err
+}
+
+func (r *Registry) SaveToolVersion(v *versionmanager.ManagedVersion) error {
+	if v.DetectedAt.IsZero() {
+		v.DetectedAt = time.Now()
+	}
+	res, err := r.db.Exec(`
+		INSERT INTO tool_versions (
+			tool_key, version, install_path, bin_path, source, is_default,
+			is_active, can_delete, delete_policy, detected_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(tool_key, install_path) DO UPDATE SET
+			version=excluded.version,
+			bin_path=excluded.bin_path,
+			source=excluded.source,
+			is_default=excluded.is_default,
+			is_active=excluded.is_active,
+			can_delete=excluded.can_delete,
+			delete_policy=excluded.delete_policy,
+			detected_at=excluded.detected_at
+	`, v.ToolKey, v.Version, v.InstallPath, v.BinPath, string(v.Source), boolToInt(v.IsDefault),
+		boolToInt(v.IsActive), boolToInt(v.CanDelete), string(v.DeletePolicy), v.DetectedAt)
+	if err != nil {
+		return err
+	}
+	if v.ID == 0 {
+		id, err := res.LastInsertId()
+		if err == nil {
+			v.ID = id
+		}
+	}
+	return nil
+}
+
+func (r *Registry) ListToolVersions(toolKey string) ([]versionmanager.ManagedVersion, error) {
+	rows, err := r.db.Query(`
+		SELECT id, tool_key, version, install_path, bin_path, source,
+		       is_default, is_active, can_delete, delete_policy, detected_at
+		FROM tool_versions
+		WHERE tool_key = ?
+		ORDER BY is_default DESC, version DESC
+	`, toolKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var versions []versionmanager.ManagedVersion
+	for rows.Next() {
+		var v versionmanager.ManagedVersion
+		var isDefault, isActive, canDelete int
+		var source, deletePolicy string
+		if err := rows.Scan(&v.ID, &v.ToolKey, &v.Version, &v.InstallPath, &v.BinPath, &source, &isDefault, &isActive, &canDelete, &deletePolicy, &v.DetectedAt); err != nil {
+			return nil, err
+		}
+		v.Source = versionmanager.VersionSource(source)
+		v.IsDefault = isDefault != 0
+		v.IsActive = isActive != 0
+		v.CanDelete = canDelete != 0
+		v.DeletePolicy = versionmanager.DeletePolicy(deletePolicy)
+		versions = append(versions, v)
+	}
+	return versions, rows.Err()
+}
+
+func (r *Registry) SaveInstallStrategy(strategy versionmanager.InstallStrategy) error {
+	if strategy.UpdatedAt.IsZero() {
+		strategy.UpdatedAt = time.Now()
+	}
+	_, err := r.db.Exec(`
+		INSERT INTO version_install_strategies (tool_key, root_dir, reason, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(tool_key) DO UPDATE SET
+			root_dir=excluded.root_dir,
+			reason=excluded.reason,
+			updated_at=excluded.updated_at
+	`, strategy.ToolKey, strategy.RootDir, strategy.Reason, strategy.UpdatedAt)
+	return err
+}
+
+func (r *Registry) GetInstallStrategy(toolKey string) (*versionmanager.InstallStrategy, error) {
+	row := r.db.QueryRow(`
+		SELECT tool_key, root_dir, reason, updated_at
+		FROM version_install_strategies
+		WHERE tool_key = ?
+	`, toolKey)
+	var strategy versionmanager.InstallStrategy
+	if err := row.Scan(&strategy.ToolKey, &strategy.RootDir, &strategy.Reason, &strategy.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &strategy, nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func (r *Registry) ExportSnapshotData() (map[string]interface{}, error) {
