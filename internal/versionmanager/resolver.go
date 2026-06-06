@@ -11,12 +11,15 @@ func ResolveInstallRoot(env Environment, toolKey string, version string) (*Versi
 	if !ok {
 		return nil, fmt.Errorf("unsupported tool: %s", toolKey)
 	}
-	if strings.TrimSpace(version) == "" {
+	version = strings.TrimSpace(version)
+	if version == "" {
 		return nil, fmt.Errorf("version is required")
 	}
 
-	if value := env.Getenv(tool.EnvVar); value != "" {
-		return planFromExistingRoot(tool, version, value, fmt.Sprintf("based on %s=%s", tool.EnvVar, value)), nil
+	if value := strings.TrimSpace(env.Getenv(tool.EnvVar)); value != "" {
+		if plan := planFromExistingRoot(env, tool, version, value, fmt.Sprintf("based on %s=%s", tool.EnvVar, value)); plan != nil {
+			return plan, nil
+		}
 	}
 
 	if exe := env.LookPath(strings.TrimSuffix(tool.PrimaryExe, filepath.Ext(tool.PrimaryExe))); exe != "" {
@@ -24,13 +27,20 @@ func ResolveInstallRoot(env Environment, toolKey string, version string) (*Versi
 		if strings.EqualFold(filepath.Base(root), "bin") || strings.EqualFold(filepath.Base(root), "cmd") {
 			root = filepath.Dir(root)
 		}
-		return planFromExistingRoot(tool, version, root, fmt.Sprintf("based on PATH executable %s", exe)), nil
+		if plan := planFromExistingRoot(env, tool, version, root, fmt.Sprintf("based on PATH executable %s", exe)); plan != nil {
+			return plan, nil
+		}
 	}
 
 	return nil, fmt.Errorf("cannot infer install root for %s", toolKey)
 }
 
-func planFromExistingRoot(tool ToolDefinition, version string, existingRoot string, reason string) *VersionInstallPlan {
+func planFromExistingRoot(env Environment, tool ToolDefinition, version string, existingRoot string, reason string) *VersionInstallPlan {
+	existingRoot = filepath.Clean(strings.TrimSpace(existingRoot))
+	if existingRoot == "" || existingRoot == "." {
+		return nil
+	}
+
 	parent := filepath.Dir(existingRoot)
 	targetName := targetDirName(tool.Key, version)
 	target := filepath.Join(parent, targetName)
@@ -39,6 +49,7 @@ func planFromExistingRoot(tool ToolDefinition, version string, existingRoot stri
 		Version:        version,
 		TargetDir:      target,
 		ExtractedDir:   target,
+		WillOverwrite:  env.DirExists(target),
 		ResolverReason: reason,
 		EnvironmentChanges: map[string]string{
 			tool.EnvVar: target,
