@@ -517,3 +517,64 @@ func TestNodeResolverUsesPlausibleDirectPathRoot(t *testing.T) {
 		t.Fatalf("TargetDir = %q", plan.TargetDir)
 	}
 }
+
+func TestResolverGenericEnvRootFallsThroughToValidPath(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\tools`
+	env.paths["go"] = `D:\production\go1.26\bin\go.exe`
+	env.dirs[`D:\tools`] = true
+	env.dirs[`D:\production\go1.26`] = true
+
+	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err != nil {
+		t.Fatalf("ResolveInstallRoot failed: %v", err)
+	}
+	if plan.TargetDir != `D:\production\go1.25.0` {
+		t.Fatalf("TargetDir = %q", plan.TargetDir)
+	}
+}
+
+func TestResolverGenericEnvRootWithoutPathReturnsCannotInfer(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["NODE_HOME"] = `D:\production`
+	env.dirs[`D:\production`] = true
+
+	_, err := ResolveInstallRoot(env, "node", "22.11.0")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot infer install root") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestGoResolverAcceptsOfficialGoVersionString(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
+
+	plan, err := ResolveInstallRoot(env, "go", "go1.25.0")
+	if err != nil {
+		t.Fatalf("ResolveInstallRoot failed: %v", err)
+	}
+	if plan.Version != "1.25.0" {
+		t.Fatalf("Version = %q", plan.Version)
+	}
+	if plan.TargetDir != `D:\production\go1.25.0` {
+		t.Fatalf("TargetDir = %q", plan.TargetDir)
+	}
+}
+
+func TestResolverRejectsBroadGoLikePathRoot(t *testing.T) {
+	env := newFakeEnvironment()
+	env.paths["go"] = `D:\production\google\bin\go.exe`
+	env.dirs[`D:\production\google`] = true
+
+	_, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot infer install root") {
+		t.Fatalf("error = %q", err)
+	}
+}

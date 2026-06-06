@@ -11,7 +11,7 @@ func ResolveInstallRoot(env Environment, toolKey string, version string) (*Versi
 	if !ok {
 		return nil, fmt.Errorf("unsupported tool: %s", toolKey)
 	}
-	version = strings.TrimSpace(version)
+	version = canonicalVersion(tool, version)
 	if version == "" {
 		return nil, fmt.Errorf("version is required")
 	}
@@ -55,7 +55,7 @@ func isPlausibleToolRoot(tool ToolDefinition, root string) bool {
 	base := strings.ToLower(filepath.Base(root))
 	switch tool.Key {
 	case "go":
-		return strings.HasPrefix(base, "go")
+		return base == "go" || strings.HasPrefix(base, "go1") || strings.HasPrefix(base, "go-")
 	case "node":
 		return base == "node" || base == "nodejs" || strings.HasPrefix(base, "node-") || strings.HasPrefix(base, "node-v")
 	case "bun":
@@ -75,6 +75,9 @@ func planFromExistingRoot(env Environment, tool ToolDefinition, version string, 
 	if !env.DirExists(existingRoot) {
 		return nil
 	}
+	if !isPlausibleToolRoot(tool, existingRoot) {
+		return nil
+	}
 
 	parent := filepath.Dir(existingRoot)
 	targetName := targetDirName(tool.Key, version)
@@ -90,6 +93,14 @@ func planFromExistingRoot(env Environment, tool ToolDefinition, version string, 
 			tool.EnvVar: target,
 		},
 	}
+}
+
+func canonicalVersion(tool ToolDefinition, version string) string {
+	version = strings.TrimSpace(version)
+	if tool.Key == "go" && strings.HasPrefix(strings.ToLower(version), "go") {
+		return version[2:]
+	}
+	return version
 }
 
 func normalizeExistingRoot(existingRoot string) (string, bool) {
