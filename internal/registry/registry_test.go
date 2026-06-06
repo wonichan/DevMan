@@ -710,3 +710,141 @@ func TestVersionManagementTablesPersistRecords(t *testing.T) {
 		t.Fatalf("unexpected strategy: %#v", gotStrategy)
 	}
 }
+
+func TestSaveToolVersionUpsertReloadsExistingIDAndUpdatesFields(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	first := &versionmanager.ManagedVersion{
+		ToolKey:      "go",
+		Version:      "1.25.0",
+		InstallPath:  `D:\production\go`,
+		BinPath:      `D:\production\go\bin\go.exe`,
+		Source:       versionmanager.SourceDevMan,
+		IsDefault:    false,
+		IsActive:     true,
+		CanDelete:    false,
+		DeletePolicy: versionmanager.DeletePolicyBlocked,
+		DetectedAt:   time.Now(),
+	}
+	if err := reg.SaveToolVersion(first); err != nil {
+		t.Fatalf("SaveToolVersion first failed: %v", err)
+	}
+	if first.ID == 0 {
+		t.Fatal("expected first save to assign ID")
+	}
+
+	other := &versionmanager.ManagedVersion{
+		ToolKey:      "node",
+		Version:      "24.0.0",
+		InstallPath:  `D:\production\node`,
+		Source:       versionmanager.SourceDevMan,
+		DeletePolicy: versionmanager.DeletePolicyDirect,
+		DetectedAt:   time.Now(),
+	}
+	if err := reg.SaveToolVersion(other); err != nil {
+		t.Fatalf("SaveToolVersion other failed: %v", err)
+	}
+
+	second := &versionmanager.ManagedVersion{
+		ToolKey:      "go",
+		Version:      "1.26.0",
+		InstallPath:  `D:\production\go`,
+		BinPath:      `D:\production\go\bin\go.exe`,
+		Source:       versionmanager.SourceDevMan,
+		IsDefault:    true,
+		IsActive:     true,
+		CanDelete:    true,
+		DeletePolicy: versionmanager.DeletePolicyDirect,
+		DetectedAt:   time.Now(),
+	}
+	if err := reg.SaveToolVersion(second); err != nil {
+		t.Fatalf("SaveToolVersion second failed: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("expected upsert to reload existing id %d, got %d", first.ID, second.ID)
+	}
+	var rowCount int
+	if err := reg.db.QueryRow(`SELECT COUNT(*) FROM tool_versions WHERE tool_key = ? AND install_path = ?`, "go", `D:\production\go`).Scan(&rowCount); err != nil {
+		t.Fatalf("count upserted rows failed: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("expected exactly one row for upserted path, got %d", rowCount)
+	}
+
+	versions, err := reg.ListToolVersions("go")
+	if err != nil {
+		t.Fatalf("ListToolVersions failed: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("expected exactly one go version after upsert, got %#v", versions)
+	}
+	got := versions[0]
+	if got.ID != first.ID || got.Version != "1.26.0" || !got.IsDefault || !got.CanDelete || got.DeletePolicy != versionmanager.DeletePolicyDirect {
+		t.Fatalf("upsert fields were not persisted: %#v", got)
+	}
+}
+
+func TestListToolVersionsToleratesNullableOptionalFields(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	_, err := reg.db.Exec(`
+		INSERT INTO tool_versions (
+			tool_key, version, install_path, bin_path, source,
+			is_default, is_active, can_delete, delete_policy, detected_at
+		) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?)
+	`, "go", "1.26.0", `D:\production\go-nullable`, string(versionmanager.SourceExternal), 0, 1, 0, time.Now())
+	if err != nil {
+		t.Fatalf("insert nullable tool version failed: %v", err)
+	}
+
+	versions, err := reg.ListToolVersions("go")
+	if err != nil {
+		t.Fatalf("ListToolVersions should tolerate nullable fields: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("expected 1 version, got %#v", versions)
+	}
+	if versions[0].BinPath != "" || versions[0].DeletePolicy != "" {
+		t.Fatalf("expected empty optional fields, got %#v", versions[0])
+	}
+}
+
+func TestInstallStrategyNullableReasonAndUpsertReplacement(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	_, err := reg.db.Exec(`
+		INSERT INTO version_install_strategies (tool_key, root_dir, reason, updated_at)
+		VALUES (?, ?, NULL, ?)
+	`, "go", `D:\production`, time.Now())
+	if err != nil {
+		t.Fatalf("insert nullable install strategy failed: %v", err)
+	}
+
+	got, err := reg.GetInstallStrategy("go")
+	if err != nil {
+		t.Fatalf("GetInstallStrategy should tolerate nullable reason: %v", err)
+	}
+	if got == nil || got.Reason != "" {
+		t.Fatalf("expected empty reason, got %#v", got)
+	}
+
+	replacement := versionmanager.InstallStrategy{
+		ToolKey:   "go",
+		RootDir:   `D:\tools`,
+		Reason:    "changed by user",
+		UpdatedAt: time.Now(),
+	}
+	if err := reg.SaveInstallStrategy(replacement); err != nil {
+		t.Fatalf("SaveInstallStrategy replacement failed: %v", err)
+	}
+	got, err = reg.GetInstallStrategy("go")
+	if err != nil {
+		t.Fatalf("GetInstallStrategy replacement failed: %v", err)
+	}
+	if got == nil || got.RootDir != `D:\tools` || got.Reason != "changed by user" {
+		t.Fatalf("expected replacement strategy, got %#v", got)
+	}
+}

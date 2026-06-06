@@ -611,7 +611,7 @@ func (r *Registry) SaveToolVersion(v *versionmanager.ManagedVersion) error {
 	if v.DetectedAt.IsZero() {
 		v.DetectedAt = time.Now()
 	}
-	res, err := r.db.Exec(`
+	_, err := r.db.Exec(`
 		INSERT INTO tool_versions (
 			tool_key, version, install_path, bin_path, source, is_default,
 			is_active, can_delete, delete_policy, detected_at
@@ -630,19 +630,16 @@ func (r *Registry) SaveToolVersion(v *versionmanager.ManagedVersion) error {
 	if err != nil {
 		return err
 	}
-	if v.ID == 0 {
-		id, err := res.LastInsertId()
-		if err == nil {
-			v.ID = id
-		}
-	}
-	return nil
+	return r.db.QueryRow(
+		`SELECT id FROM tool_versions WHERE tool_key = ? AND install_path = ?`,
+		v.ToolKey, v.InstallPath,
+	).Scan(&v.ID)
 }
 
 func (r *Registry) ListToolVersions(toolKey string) ([]versionmanager.ManagedVersion, error) {
 	rows, err := r.db.Query(`
-		SELECT id, tool_key, version, install_path, bin_path, source,
-		       is_default, is_active, can_delete, delete_policy, detected_at
+		SELECT id, tool_key, version, install_path, COALESCE(bin_path, ''), source,
+		       is_default, is_active, can_delete, COALESCE(delete_policy, ''), detected_at
 		FROM tool_versions
 		WHERE tool_key = ?
 		ORDER BY is_default DESC, version DESC
@@ -687,7 +684,7 @@ func (r *Registry) SaveInstallStrategy(strategy versionmanager.InstallStrategy) 
 
 func (r *Registry) GetInstallStrategy(toolKey string) (*versionmanager.InstallStrategy, error) {
 	row := r.db.QueryRow(`
-		SELECT tool_key, root_dir, reason, updated_at
+		SELECT tool_key, root_dir, COALESCE(reason, ''), updated_at
 		FROM version_install_strategies
 		WHERE tool_key = ?
 	`, toolKey)
