@@ -15,6 +15,9 @@ func ResolveInstallRoot(env Environment, toolKey string, version string) (*Versi
 	if version == "" {
 		return nil, fmt.Errorf("version is required")
 	}
+	if !isSafeVersion(version) {
+		return nil, fmt.Errorf("invalid version: %s", version)
+	}
 
 	if value := strings.TrimSpace(env.Getenv(tool.EnvVar)); value != "" {
 		if plan := planFromExistingRoot(env, tool, version, value, fmt.Sprintf("based on %s=%s", tool.EnvVar, value)); plan != nil {
@@ -36,8 +39,8 @@ func ResolveInstallRoot(env Environment, toolKey string, version string) (*Versi
 }
 
 func planFromExistingRoot(env Environment, tool ToolDefinition, version string, existingRoot string, reason string) *VersionInstallPlan {
-	existingRoot = filepath.Clean(strings.TrimSpace(existingRoot))
-	if existingRoot == "" || existingRoot == "." {
+	existingRoot, ok := normalizeExistingRoot(existingRoot)
+	if !ok {
 		return nil
 	}
 
@@ -55,6 +58,39 @@ func planFromExistingRoot(env Environment, tool ToolDefinition, version string, 
 			tool.EnvVar: target,
 		},
 	}
+}
+
+func normalizeExistingRoot(existingRoot string) (string, bool) {
+	clean := filepath.Clean(strings.TrimSpace(existingRoot))
+	if clean == "" || clean == "." || clean == ".." {
+		return "", false
+	}
+	if !filepath.IsAbs(clean) {
+		return "", false
+	}
+	return clean, true
+}
+
+func isSafeVersion(version string) bool {
+	if strings.Contains(version, "..") {
+		return false
+	}
+	for _, r := range version {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func targetDirName(toolKey string, version string) string {
