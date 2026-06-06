@@ -43,6 +43,9 @@ func planFromExistingRoot(env Environment, tool ToolDefinition, version string, 
 	if !ok {
 		return nil
 	}
+	if !env.DirExists(existingRoot) {
+		return nil
+	}
 
 	parent := filepath.Dir(existingRoot)
 	targetName := targetDirName(tool.Key, version)
@@ -75,7 +78,15 @@ func isSafeVersion(version string) bool {
 	if strings.Contains(version, "..") {
 		return false
 	}
-	for _, r := range version {
+	clean := strings.TrimPrefix(version, "v")
+	if clean == "" {
+		return false
+	}
+	first := clean[0]
+	if first < '0' || first > '9' {
+		return false
+	}
+	for _, r := range clean {
 		if r >= 'a' && r <= 'z' {
 			continue
 		}

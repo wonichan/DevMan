@@ -8,6 +8,7 @@ import (
 func TestGoResolverUsesGOROOTSibling(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
 	if err != nil {
@@ -24,6 +25,7 @@ func TestGoResolverUsesGOROOTSibling(t *testing.T) {
 func TestNodeResolverUsesNODEHOME(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["NODE_HOME"] = `D:\production\nodejs`
+	env.dirs[`D:\production\nodejs`] = true
 
 	plan, err := ResolveInstallRoot(env, "node", "22.11.0")
 	if err != nil {
@@ -37,6 +39,7 @@ func TestNodeResolverUsesNODEHOME(t *testing.T) {
 func TestFlutterResolverUsesFlutterRootSibling(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["FLUTTER_ROOT"] = `D:\production\flutter`
+	env.dirs[`D:\production\flutter`] = true
 
 	plan, err := ResolveInstallRoot(env, "flutter", "3.24.5")
 	if err != nil {
@@ -51,6 +54,8 @@ func TestResolverEnvVarWinsWhenPathAlsoPresent(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = `D:\env\go1.26`
 	env.paths["go"] = `D:\path\go1.26\bin\go.exe`
+	env.dirs[`D:\env\go1.26`] = true
+	env.dirs[`D:\path\go1.26`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
 	if err != nil {
@@ -64,6 +69,7 @@ func TestResolverEnvVarWinsWhenPathAlsoPresent(t *testing.T) {
 func TestResolverTrimsAndCleansEnvRoot(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = "  D:\\production\\go1.26\\  "
+	env.dirs[`D:\production\go1.26`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
 	if err != nil {
@@ -77,6 +83,7 @@ func TestResolverTrimsAndCleansEnvRoot(t *testing.T) {
 func TestGoResolverUsesPathExecutableBinParent(t *testing.T) {
 	env := newFakeEnvironment()
 	env.paths["go"] = `D:\production\go1.26\bin\go.exe`
+	env.dirs[`D:\production\go1.26`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
 	if err != nil {
@@ -90,6 +97,7 @@ func TestGoResolverUsesPathExecutableBinParent(t *testing.T) {
 func TestFlutterResolverUsesPathExecutableBinParent(t *testing.T) {
 	env := newFakeEnvironment()
 	env.paths["flutter"] = `D:\tools\flutter\bin\flutter.bat`
+	env.dirs[`D:\tools\flutter`] = true
 
 	plan, err := ResolveInstallRoot(env, "flutter", "3.24.5")
 	if err != nil {
@@ -103,6 +111,7 @@ func TestFlutterResolverUsesPathExecutableBinParent(t *testing.T) {
 func TestBunResolverUsesPathExecutableCmdParent(t *testing.T) {
 	env := newFakeEnvironment()
 	env.paths["bun"] = `D:\tools\bun\cmd\bun.exe`
+	env.dirs[`D:\tools\bun`] = true
 
 	plan, err := ResolveInstallRoot(env, "bun", "1.2.0")
 	if err != nil {
@@ -116,6 +125,7 @@ func TestBunResolverUsesPathExecutableCmdParent(t *testing.T) {
 func TestResolverRejectsBlankVersion(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
 
 	if _, err := ResolveInstallRoot(env, "go", "   "); err == nil {
 		t.Fatal("expected error")
@@ -134,6 +144,7 @@ func TestResolverWhitespaceEnvVarFallsThroughToPath(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = "   "
 	env.paths["go"] = `D:\path\go1.26\bin\go.exe`
+	env.dirs[`D:\path\go1.26`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
 	if err != nil {
@@ -147,6 +158,7 @@ func TestResolverWhitespaceEnvVarFallsThroughToPath(t *testing.T) {
 func TestResolverSetsWillOverwriteForExistingTargetDir(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
 	env.dirs[`D:\production\go1.25.0`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
@@ -161,6 +173,7 @@ func TestResolverSetsWillOverwriteForExistingTargetDir(t *testing.T) {
 func TestResolverTrimsVersionForPlanAndTargetDir(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "  1.25.0  ")
 	if err != nil {
@@ -178,6 +191,7 @@ func TestResolverRelativeEnvRootFallsThroughToPath(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = "go1.26"
 	env.paths["go"] = `D:\path\go1.26\bin\go.exe`
+	env.dirs[`D:\path\go1.26`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
 	if err != nil {
@@ -192,6 +206,7 @@ func TestResolverDotDotEnvRootFallsThroughToPath(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = ".."
 	env.paths["go"] = `D:\path\go1.26\bin\go.exe`
+	env.dirs[`D:\path\go1.26`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
 	if err != nil {
@@ -206,6 +221,7 @@ func TestResolverDriveRelativeEnvRootFallsThroughToPath(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = "D:"
 	env.paths["go"] = `D:\path\go1.26\bin\go.exe`
+	env.dirs[`D:\path\go1.26`] = true
 
 	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
 	if err != nil {
@@ -232,6 +248,7 @@ func TestResolverInvalidEnvRootWithoutPathReturnsCannotInfer(t *testing.T) {
 func TestResolverRejectsPathLikeVersions(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
 
 	for _, version := range []string{"../1.25.0", "1.25/evil", `1.25\evil`, "C:1.25"} {
 		t.Run(version, func(t *testing.T) {
@@ -245,6 +262,7 @@ func TestResolverRejectsPathLikeVersions(t *testing.T) {
 func TestResolverAllowsLettersDigitsDotsUnderscoresAndDashesInVersion(t *testing.T) {
 	env := newFakeEnvironment()
 	env.vars["NODE_HOME"] = `D:\production\nodejs`
+	env.dirs[`D:\production\nodejs`] = true
 
 	plan, err := ResolveInstallRoot(env, "node", "22.11.0-rc_1")
 	if err != nil {
@@ -252,5 +270,84 @@ func TestResolverAllowsLettersDigitsDotsUnderscoresAndDashesInVersion(t *testing
 	}
 	if plan.TargetDir != `D:\production\node-v22.11.0-rc_1` {
 		t.Fatalf("TargetDir = %q", plan.TargetDir)
+	}
+}
+
+func TestResolverNonexistentEnvRootFallsThroughToPath(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\missing\go1.26`
+	env.paths["go"] = `D:\path\go1.26\bin\go.exe`
+	env.dirs[`D:\path\go1.26`] = true
+
+	plan, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err != nil {
+		t.Fatalf("ResolveInstallRoot failed: %v", err)
+	}
+	if plan.TargetDir != `D:\path\go1.25.0` {
+		t.Fatalf("TargetDir = %q", plan.TargetDir)
+	}
+}
+
+func TestResolverNonexistentEnvRootWithoutPathReturnsCannotInfer(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\missing\go1.26`
+
+	_, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot infer install root") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestResolverNonexistentPathRootReturnsCannotInfer(t *testing.T) {
+	env := newFakeEnvironment()
+	env.paths["go"] = `D:\missing\go1.26\bin\go.exe`
+
+	_, err := ResolveInstallRoot(env, "go", "1.25.0")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot infer install root") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestResolverRejectsDegenerateVersions(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
+
+	for _, version := range []string{"v", ".", "-", "_"} {
+		t.Run(version, func(t *testing.T) {
+			if _, err := ResolveInstallRoot(env, "go", version); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func TestResolverAllowsLeadingVAndPrereleaseVersions(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["NODE_HOME"] = `D:\production\nodejs`
+	env.dirs[`D:\production\nodejs`] = true
+
+	for _, tc := range []struct {
+		version string
+		target  string
+	}{
+		{version: "v1.2.3", target: `D:\production\node-v1.2.3`},
+		{version: "22.11.0-rc.1", target: `D:\production\node-v22.11.0-rc.1`},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			plan, err := ResolveInstallRoot(env, "node", tc.version)
+			if err != nil {
+				t.Fatalf("ResolveInstallRoot failed: %v", err)
+			}
+			if plan.TargetDir != tc.target {
+				t.Fatalf("TargetDir = %q", plan.TargetDir)
+			}
+		})
 	}
 }

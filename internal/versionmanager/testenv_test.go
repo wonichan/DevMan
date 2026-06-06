@@ -4,7 +4,6 @@ type fakeEnvironment struct {
 	vars  map[string]string
 	paths map[string]string
 	dirs  map[string]bool
-	files map[string]bool
 }
 
 func newFakeEnvironment() *fakeEnvironment {
@@ -12,7 +11,6 @@ func newFakeEnvironment() *fakeEnvironment {
 		vars:  map[string]string{},
 		paths: map[string]string{},
 		dirs:  map[string]bool{},
-		files: map[string]bool{},
 	}
 }
 
@@ -26,8 +24,4 @@ func (f *fakeEnvironment) LookPath(command string) string {
 
 func (f *fakeEnvironment) DirExists(path string) bool {
 	return f.dirs[path]
-}
-
-func (f *fakeEnvironment) FileExists(path string) bool {
-	return f.files[path]
 }
