@@ -26,16 +26,26 @@ func ResolveInstallRoot(env Environment, toolKey string, version string) (*Versi
 	}
 
 	if exe := env.LookPath(strings.TrimSuffix(tool.PrimaryExe, filepath.Ext(tool.PrimaryExe))); exe != "" {
-		root := filepath.Dir(exe)
-		if strings.EqualFold(filepath.Base(root), "bin") || strings.EqualFold(filepath.Base(root), "cmd") {
-			root = filepath.Dir(root)
-		}
-		if plan := planFromExistingRoot(env, tool, version, root, fmt.Sprintf("based on PATH executable %s", exe)); plan != nil {
-			return plan, nil
+		if root, ok := rootFromPathExecutable(exe); ok {
+			if plan := planFromExistingRoot(env, tool, version, root, fmt.Sprintf("based on PATH executable %s", exe)); plan != nil {
+				return plan, nil
+			}
 		}
 	}
 
 	return nil, fmt.Errorf("cannot infer install root for %s", toolKey)
+}
+
+func rootFromPathExecutable(exe string) (string, bool) {
+	root := filepath.Dir(exe)
+	if strings.EqualFold(filepath.Base(root), "bin") || strings.EqualFold(filepath.Base(root), "cmd") {
+		parent := filepath.Dir(root)
+		if filepath.Dir(parent) == parent {
+			return "", false
+		}
+		root = parent
+	}
+	return root, true
 }
 
 func planFromExistingRoot(env Environment, tool ToolDefinition, version string, existingRoot string, reason string) *VersionInstallPlan {
@@ -101,7 +111,8 @@ func isSafeVersion(version string) bool {
 		}
 		return false
 	}
-	return true
+	last := clean[len(clean)-1]
+	return (last >= 'a' && last <= 'z') || (last >= 'A' && last <= 'Z') || (last >= '0' && last <= '9')
 }
 
 func targetDirName(toolKey string, version string) string {

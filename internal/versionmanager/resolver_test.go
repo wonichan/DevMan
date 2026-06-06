@@ -351,3 +351,67 @@ func TestResolverAllowsLeadingVAndPrereleaseVersions(t *testing.T) {
 		})
 	}
 }
+
+func TestResolverRejectsPathExecutableDirectlyUnderDriveRootBinOrCmd(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		toolKey   string
+		command   string
+		path      string
+		driveRoot string
+		version   string
+	}{
+		{
+			name:      "go in C bin",
+			toolKey:   "go",
+			command:   "go",
+			path:      `C:\bin\go.exe`,
+			driveRoot: `C:\`,
+			version:   "1.25.0",
+		},
+		{
+			name:      "go in D bin",
+			toolKey:   "go",
+			command:   "go",
+			path:      `D:\bin\go.exe`,
+			driveRoot: `D:\`,
+			version:   "1.25.0",
+		},
+		{
+			name:      "bun in D cmd",
+			toolKey:   "bun",
+			command:   "bun",
+			path:      `D:\cmd\bun.exe`,
+			driveRoot: `D:\`,
+			version:   "1.2.0",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newFakeEnvironment()
+			env.paths[tc.command] = tc.path
+			env.dirs[tc.driveRoot] = true
+
+			_, err := ResolveInstallRoot(env, tc.toolKey, tc.version)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), "cannot infer install root") {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
+
+func TestResolverRejectsVersionsEndingInSeparator(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
+
+	for _, version := range []string{"1.", "1_", "1-"} {
+		t.Run(version, func(t *testing.T) {
+			if _, err := ResolveInstallRoot(env, "go", version); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
