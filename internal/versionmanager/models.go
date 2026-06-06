@@ -2,17 +2,21 @@ package versionmanager
 
 import "time"
 
-const (
-	SourceDevMan         = "devman"
-	SourceExternal       = "external"
-	SourceVersionManager = "version_manager"
-)
+type VersionSource string
 
 const (
-	DeletePolicyDirect        = "direct"
-	DeletePolicyRemoveOnly    = "remove_tracking"
-	DeletePolicyForceRequired = "force_required"
-	DeletePolicyBlocked       = "blocked"
+	SourceDevMan         VersionSource = "devman"
+	SourceExternal       VersionSource = "external"
+	SourceVersionManager VersionSource = "version_manager"
+)
+
+type DeletePolicy string
+
+const (
+	DeletePolicyDirect        DeletePolicy = "direct"
+	DeletePolicyRemoveOnly    DeletePolicy = "remove_tracking"
+	DeletePolicyForceRequired DeletePolicy = "force_required"
+	DeletePolicyBlocked       DeletePolicy = "blocked"
 )
 
 type ToolVersionCatalog struct {
@@ -32,17 +36,17 @@ type AvailableVersion struct {
 }
 
 type ManagedVersion struct {
-	ID           int64     `json:"Id"`
-	ToolKey      string    `json:"ToolKey"`
-	Version      string    `json:"Version"`
-	InstallPath  string    `json:"InstallPath"`
-	BinPath      string    `json:"BinPath"`
-	Source       string    `json:"Source"`
-	IsDefault    bool      `json:"IsDefault"`
-	IsActive     bool      `json:"IsActive"`
-	CanDelete    bool      `json:"CanDelete"`
-	DeletePolicy string    `json:"DeletePolicy"`
-	DetectedAt   time.Time `json:"DetectedAt"`
+	ID           int64         `json:"Id"`
+	ToolKey      string        `json:"ToolKey"`
+	Version      string        `json:"Version"`
+	InstallPath  string        `json:"InstallPath"`
+	BinPath      string        `json:"BinPath"`
+	Source       VersionSource `json:"Source"`
+	IsDefault    bool          `json:"IsDefault"`
+	IsActive     bool          `json:"IsActive"`
+	CanDelete    bool          `json:"CanDelete"`
+	DeletePolicy DeletePolicy  `json:"DeletePolicy"`
+	DetectedAt   time.Time     `json:"DetectedAt"`
 }
 
 type VersionInstallPlan struct {

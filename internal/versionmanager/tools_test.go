@@ -1,37 +1,91 @@
 package versionmanager
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestSupportedToolsContainRequiredMetadata(t *testing.T) {
 	tools := SupportedTools()
-	if len(tools) != 4 {
-		t.Fatalf("expected 4 supported tools, got %d", len(tools))
+
+	expected := []ToolDefinition{
+		{
+			Key:         "go",
+			Name:        "Go",
+			EnvVar:      "GOROOT",
+			PrimaryExe:  "go.exe",
+			Shims:       []string{"go.cmd"},
+			VersionArgs: []string{"version"},
+			BinSubdir:   "bin",
+		},
+		{
+			Key:         "node",
+			Name:        "Node.js",
+			EnvVar:      "NODE_HOME",
+			PrimaryExe:  "node.exe",
+			Shims:       []string{"node.cmd", "npm.cmd", "npx.cmd"},
+			VersionArgs: []string{"--version"},
+			BinSubdir:   "",
+		},
+		{
+			Key:         "bun",
+			Name:        "Bun",
+			EnvVar:      "BUN_INSTALL",
+			PrimaryExe:  "bun.exe",
+			Shims:       []string{"bun.cmd"},
+			VersionArgs: []string{"--version"},
+			BinSubdir:   "",
+		},
+		{
+			Key:         "flutter",
+			Name:        "Flutter",
+			EnvVar:      "FLUTTER_ROOT",
+			PrimaryExe:  "flutter.bat",
+			Shims:       []string{"flutter.cmd", "dart.cmd"},
+			VersionArgs: []string{"--version"},
+			BinSubdir:   "bin",
+		},
 	}
 
-	assertTool := func(key string, envVar string, primaryShim string, versionArgs []string) {
-		t.Helper()
-		tool, ok := ToolByKey(key)
-		if !ok {
-			t.Fatalf("missing tool %q", key)
+	if len(tools) != len(expected) {
+		t.Fatalf("expected %d supported tools, got %d", len(expected), len(tools))
+	}
+
+	seen := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		if seen[tool.Key] {
+			t.Fatalf("duplicate tool key %q", tool.Key)
 		}
-		if tool.EnvVar != envVar {
-			t.Fatalf("%s EnvVar = %q, want %q", key, tool.EnvVar, envVar)
-		}
-		if len(tool.Shims) == 0 || tool.Shims[0] != primaryShim {
-			t.Fatalf("%s primary shim = %#v, want %q", key, tool.Shims, primaryShim)
-		}
-		if len(tool.VersionArgs) != len(versionArgs) {
-			t.Fatalf("%s VersionArgs = %#v, want %#v", key, tool.VersionArgs, versionArgs)
-		}
-		for i := range versionArgs {
-			if tool.VersionArgs[i] != versionArgs[i] {
-				t.Fatalf("%s VersionArgs = %#v, want %#v", key, tool.VersionArgs, versionArgs)
+		seen[tool.Key] = true
+	}
+
+	for _, want := range expected {
+		t.Run(want.Key, func(t *testing.T) {
+			got, ok := ToolByKey(want.Key)
+			if !ok {
+				t.Fatalf("missing tool %q", want.Key)
 			}
-		}
+			if got.Key != want.Key {
+				t.Fatalf("%s Key = %q, want %q", want.Key, got.Key, want.Key)
+			}
+			if got.Name != want.Name {
+				t.Fatalf("%s Name = %q, want %q", want.Key, got.Name, want.Name)
+			}
+			if got.EnvVar != want.EnvVar {
+				t.Fatalf("%s EnvVar = %q, want %q", want.Key, got.EnvVar, want.EnvVar)
+			}
+			if got.PrimaryExe != want.PrimaryExe {
+				t.Fatalf("%s PrimaryExe = %q, want %q", want.Key, got.PrimaryExe, want.PrimaryExe)
+			}
+			if !reflect.DeepEqual(got.Shims, want.Shims) {
+				t.Fatalf("%s Shims = %#v, want %#v", want.Key, got.Shims, want.Shims)
+			}
+			if !reflect.DeepEqual(got.VersionArgs, want.VersionArgs) {
+				t.Fatalf("%s VersionArgs = %#v, want %#v", want.Key, got.VersionArgs, want.VersionArgs)
+			}
+			if got.BinSubdir != want.BinSubdir {
+				t.Fatalf("%s BinSubdir = %q, want %q", want.Key, got.BinSubdir, want.BinSubdir)
+			}
+		})
 	}
-
-	assertTool("go", "GOROOT", "go.cmd", []string{"version"})
-	assertTool("node", "NODE_HOME", "node.cmd", []string{"--version"})
-	assertTool("bun", "BUN_INSTALL", "bun.cmd", []string{"--version"})
-	assertTool("flutter", "FLUTTER_ROOT", "flutter.cmd", []string{"--version"})
 }
