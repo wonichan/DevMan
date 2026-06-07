@@ -125,3 +125,9 @@
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 系统架构与数据流
 - [FRONTEND.md](./FRONTEND.md) — UI/UX 设计规范
 - [API.md](./API.md) — Go 后端 API 参考
+
+## Version Management
+
+- Added phased version management for Go, Node.js, Bun, and Flutter.
+- DevMan uses `%DEVMAN_HOME%\shims` for command switching and infers install roots from existing environment state.
+- Existing version managers such as nvm, fnm, gvm, asdf, and fvm are detected and not taken over.
