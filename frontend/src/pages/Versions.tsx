@@ -41,6 +41,7 @@ export default function Versions() {
 
   const orderedTools = useMemo(() => sortTools(tools), [tools]);
   const activeTool = orderedTools.find((tool) => tool.ToolKey === activeToolKey);
+  const localVersions = activeTool?.LocalVersions ?? [];
   const activeConflict = conflictLabel(activeTool?.ManagerConflict);
   const hasManagerConflict = Boolean(activeConflict);
 
@@ -163,7 +164,7 @@ export default function Versions() {
                 </div>
                 <div className="rounded-lg border border-[#334155] bg-[#0f172a] px-4 py-3 text-right">
                   <p className="text-[10px] uppercase text-slate-500">Local Versions</p>
-                  <p className="text-2xl font-bold text-slate-100">{activeTool.LocalVersions.length}</p>
+                  <p className="text-2xl font-bold text-slate-100">{localVersions.length}</p>
                 </div>
               </div>
 
@@ -184,7 +185,7 @@ export default function Versions() {
               </div>
 
               <div className="space-y-2">
-                {activeTool.LocalVersions.map((version) => (
+                {localVersions.map((version) => (
                   <div
                     key={`${version.ToolKey}-${version.Version}-${version.InstallPath}`}
                     className={`rounded-lg border px-4 py-3 ${
@@ -207,7 +208,7 @@ export default function Versions() {
                   </div>
                 ))}
 
-                {activeTool.LocalVersions.length === 0 && (
+                {localVersions.length === 0 && (
                   <div className="rounded-lg border border-dashed border-[#334155] bg-[#0f172a] px-4 py-6 text-center">
                     <p className="text-sm text-slate-400">暂未检测到本地版本。</p>
                   </div>
