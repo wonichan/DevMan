@@ -361,6 +361,38 @@ func (a *App) PreviewVersionInstall(toolKey string, version string) (*versionman
 	return plan, nil
 }
 
+// SwitchVersion makes a tracked tool version the active user version through DevMan shims.
+func (a *App) SwitchVersion(toolKey string, instanceId int64) (*versionmanager.VersionOperationResult, error) {
+	logrus.WithFields(logrus.Fields{"tool_key": toolKey, "instance_id": instanceId}).Info("switch version requested")
+	if a.versionManager == nil {
+		logrus.Error("switch version failed: version manager not initialized")
+		return nil, fmt.Errorf("version manager not initialized")
+	}
+	if a.reg == nil {
+		logrus.Error("switch version failed: registry not initialized")
+		return nil, fmt.Errorf("registry not initialized")
+	}
+
+	versions, err := a.reg.ListToolVersions(toolKey)
+	if err != nil {
+		logrus.WithError(err).WithField("tool_key", toolKey).Error("switch version failed to list versions")
+		return nil, err
+	}
+	for _, version := range versions {
+		if version.ID == instanceId {
+			result, err := a.versionManager.SwitchVersion(version)
+			if err != nil {
+				logrus.WithError(err).WithFields(logrus.Fields{"tool_key": toolKey, "instance_id": instanceId}).Warn("switch version failed")
+				return nil, err
+			}
+			logrus.WithFields(logrus.Fields{"tool_key": toolKey, "instance_id": instanceId}).Info("switch version completed")
+			return result, nil
+		}
+	}
+	logrus.WithFields(logrus.Fields{"tool_key": toolKey, "instance_id": instanceId}).Warn("switch version failed: version not found")
+	return nil, fmt.Errorf("version not found: %d", instanceId)
+}
+
 // DetectVersionManager reports external version-manager ownership for a tool.
 func (a *App) DetectVersionManager(toolKey string) *versionmanager.VersionManagerConflict {
 	if a.versionManager == nil {
