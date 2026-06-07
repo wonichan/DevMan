@@ -86,8 +86,15 @@ func (s *Service) InstallVersion(toolKey string, version string, targetDir strin
 		plan.TargetDir = filepath.Clean(targetDir)
 		plan.ExtractedDir = plan.TargetDir
 	}
+	if err := validateInstallPath(plan.TargetDir); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(plan.ArchiveName) == "" {
-		plan.ArchiveName = archiveFileName(*plan)
+		archiveName, err := archiveFileName(*plan)
+		if err != nil {
+			return nil, err
+		}
+		plan.ArchiveName = archiveName
 	}
 
 	downloader := s.downloader
@@ -116,15 +123,15 @@ func (s *Service) InstallVersion(toolKey string, version string, targetDir strin
 			DeletePolicy: DeletePolicyDirect,
 			DetectedAt:   now,
 		}
-		if err := s.reg.SaveToolVersion(managed); err != nil {
-			return nil, err
-		}
 		if err := s.reg.SaveInstallStrategy(InstallStrategy{
 			ToolKey:   tool.Key,
 			RootDir:   filepath.Dir(plan.TargetDir),
 			Reason:    plan.ResolverReason,
 			UpdatedAt: now,
 		}); err != nil {
+			return nil, err
+		}
+		if err := s.reg.SaveToolVersion(managed); err != nil {
 			return nil, err
 		}
 	}

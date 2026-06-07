@@ -117,6 +117,7 @@ type fakeVersionRegistry struct {
 	versions        []ManagedVersion
 	saved           []ManagedVersion
 	savedStrategies []InstallStrategy
+	saveStrategyErr error
 }
 
 func newFakeVersionRegistry(versions []ManagedVersion) *fakeVersionRegistry {
@@ -152,6 +153,9 @@ func (f *fakeVersionRegistry) GetInstallStrategy(toolKey string) (*InstallStrate
 }
 
 func (f *fakeVersionRegistry) SaveInstallStrategy(strategy InstallStrategy) error {
+	if f.saveStrategyErr != nil {
+		return f.saveStrategyErr
+	}
 	f.savedStrategies = append(f.savedStrategies, strategy)
 	return nil
 }

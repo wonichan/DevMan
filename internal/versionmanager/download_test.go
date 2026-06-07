@@ -91,6 +91,57 @@ func TestInstallVersionDownloaderFailureDoesNotSaveVersion(t *testing.T) {
 	}
 }
 
+func TestInstallVersionUnsafeOverrideTargetDoesNotDownloadOrSave(t *testing.T) {
+	tests := []struct {
+		name      string
+		targetDir string
+	}{
+		{name: "relative", targetDir: `go1.25.0`},
+		{name: "quote", targetDir: `D:\production\bad"path`},
+		{name: "drive root", targetDir: `D:\`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newFakeEnvironment()
+			env.vars["GOROOT"] = `D:\production\go1.26`
+			env.dirs[`D:\production\go1.26`] = true
+			reg := newFakeVersionRegistry(nil)
+			downloader := &fakeDownloader{}
+			service := NewService(reg, env)
+			service.downloader = downloader
+
+			_, err := service.InstallVersion("go", "1.25.0", tt.targetDir)
+			if err == nil {
+				t.Fatal("InstallVersion error = nil, want unsafe target error")
+			}
+			if len(downloader.plans) != 0 {
+				t.Fatalf("downloader plans = %d, want 0 for unsafe target", len(downloader.plans))
+			}
+			if len(reg.saved) != 0 {
+				t.Fatalf("saved versions = %d, want 0 for unsafe target", len(reg.saved))
+			}
+		})
+	}
+}
+
+func TestInstallVersionStrategyFailureDoesNotSaveVersion(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
+	reg := newFakeVersionRegistry(nil)
+	reg.saveStrategyErr = errors.New("strategy failed")
+	service := NewService(reg, env)
+	service.downloader = &fakeDownloader{}
+
+	_, err := service.InstallVersion("go", "1.25.0", `D:\production\go1.25.0`)
+	if err == nil {
+		t.Fatal("InstallVersion error = nil, want strategy save error")
+	}
+	if len(reg.saved) != 0 {
+		t.Fatalf("saved versions = %d, want 0 when strategy save fails", len(reg.saved))
+	}
+}
+
 func TestInstallVersionUnsupportedToolUsesPreviewValidation(t *testing.T) {
 	env := newFakeEnvironment()
 	reg := newFakeVersionRegistry(nil)
@@ -141,6 +192,113 @@ func TestExtractZipRejectsZipSlip(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid archive entry") {
 		t.Fatalf("extractZip error = %v, want invalid archive entry", err)
+	}
+}
+
+func TestExtractZipPrevalidatesBeforeWritingFiles(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "partial.zip")
+	createZip(t, archivePath, map[string]string{
+		"safe.txt":       "safe",
+		`C:\evil.exe`:    "bad",
+		`dir\..\evil.go`: "bad",
+	})
+	targetDir := filepath.Join(t.TempDir(), "target")
+
+	err := extractZip(archivePath, targetDir)
+	if err == nil {
+		t.Fatal("extractZip error = nil, want invalid archive entry")
+	}
+	if _, statErr := os.Stat(filepath.Join(targetDir, "safe.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("safe file stat error = %v, want not exist after prevalidation failure", statErr)
+	}
+}
+
+func TestHTTPDownloaderValidatesDownloadURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		downloadURL string
+	}{
+		{name: "blank", downloadURL: ""},
+		{name: "malformed", downloadURL: "http://[::1"},
+		{name: "unsupported scheme", downloadURL: "file:///tmp/go.zip"},
+		{name: "missing host", downloadURL: "https:///go.zip"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (HTTPDownloader{}).DownloadAndExtract(VersionInstallPlan{
+				ToolKey:     "go",
+				Version:     "1.25.0",
+				TargetDir:   filepath.Join(t.TempDir(), "go1.25.0"),
+				DownloadURL: tt.downloadURL,
+				ArchiveName: "go.zip",
+			})
+			if err == nil {
+				t.Fatal("DownloadAndExtract error = nil, want URL validation error")
+			}
+		})
+	}
+}
+
+func TestHTTPDownloaderValidatesTargetDir(t *testing.T) {
+	tests := []struct {
+		name      string
+		targetDir string
+	}{
+		{name: "blank", targetDir: ""},
+		{name: "relative", targetDir: "go1.25.0"},
+		{name: "quote", targetDir: `D:\production\bad"path`},
+		{name: "drive root", targetDir: `D:\`},
+		{name: "filesystem root", targetDir: filepath.VolumeName(os.TempDir()) + string(filepath.Separator)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (HTTPDownloader{}).DownloadAndExtract(VersionInstallPlan{
+				ToolKey:     "go",
+				Version:     "1.25.0",
+				TargetDir:   tt.targetDir,
+				DownloadURL: "https://example.com/go.zip",
+				ArchiveName: "go.zip",
+			})
+			if err == nil {
+				t.Fatal("DownloadAndExtract error = nil, want target validation error")
+			}
+		})
+	}
+}
+
+func TestArchiveFileNameRejectsUnsafeFallbacks(t *testing.T) {
+	tests := []struct {
+		name string
+		plan VersionInstallPlan
+	}{
+		{name: "unsafe archive name", plan: VersionInstallPlan{ArchiveName: `..\go.zip`, DownloadURL: "https://example.com/"}},
+		{name: "unsafe URL basename", plan: VersionInstallPlan{DownloadURL: "https://example.com/C:/go.zip"}},
+		{name: "unsafe fallback tool", plan: VersionInstallPlan{ToolKey: `go\evil`, Version: "1.25.0"}},
+		{name: "unsafe fallback version", plan: VersionInstallPlan{ToolKey: "go", Version: `..\1.25.0`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if name, err := archiveFileName(tt.plan); err == nil {
+				t.Fatalf("archiveFileName = %q, nil error; want unsafe name error", name)
+			}
+		})
+	}
+}
+
+func TestArchiveFileNameReturnsSafeBasename(t *testing.T) {
+	name, err := archiveFileName(VersionInstallPlan{
+		ToolKey:     "go",
+		Version:     "1.25.0",
+		DownloadURL: "https://example.com/downloads/go.zip",
+	})
+	if err != nil {
+		t.Fatalf("archiveFileName returned error: %v", err)
+	}
+	if name != "go.zip" {
+		t.Fatalf("archiveFileName = %q, want go.zip", name)
+	}
+	if strings.ContainsAny(name, `/\`) || filepath.VolumeName(name) != "" || name == "." || name == ".." {
+		t.Fatalf("archiveFileName = %q, want filename-only safe basename", name)
 	}
 }
 

@@ -18,14 +18,14 @@ type Downloader interface {
 type HTTPDownloader struct{}
 
 func (HTTPDownloader) DownloadAndExtract(plan VersionInstallPlan) error {
-	if strings.TrimSpace(plan.DownloadURL) == "" {
-		return fmt.Errorf("download URL is required")
+	if err := validateDownloadURL(plan.DownloadURL); err != nil {
+		return err
 	}
-	if strings.TrimSpace(plan.TargetDir) == "" {
-		return fmt.Errorf("target directory is required")
+	if err := validateInstallPath(plan.TargetDir); err != nil {
+		return err
 	}
 
-	resp, err := http.Get(plan.DownloadURL)
+	resp, err := http.Get(strings.TrimSpace(plan.DownloadURL))
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,11 @@ func (HTTPDownloader) DownloadAndExtract(plan VersionInstallPlan) error {
 	}
 	defer os.RemoveAll(tempDir)
 
-	archivePath := filepath.Join(tempDir, archiveFileName(plan))
+	archiveName, err := archiveFileName(plan)
+	if err != nil {
+		return err
+	}
+	archivePath := filepath.Join(tempDir, archiveName)
 	archive, err := os.Create(archivePath)
 	if err != nil {
 		return err
@@ -59,13 +63,32 @@ func (HTTPDownloader) DownloadAndExtract(plan VersionInstallPlan) error {
 	return extractZip(archivePath, plan.TargetDir)
 }
 
-func archiveFileName(plan VersionInstallPlan) string {
-	if name := safeBaseName(plan.ArchiveName); name != "" {
-		return name
+func validateDownloadURL(rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return fmt.Errorf("download URL is required")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid download URL: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("download URL must use http or https")
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return fmt.Errorf("download URL host is required")
+	}
+	return nil
+}
+
+func archiveFileName(plan VersionInstallPlan) (string, error) {
+	if strings.TrimSpace(plan.ArchiveName) != "" {
+		return safeArchiveBaseName(plan.ArchiveName)
 	}
 	if parsed, err := url.Parse(plan.DownloadURL); err == nil {
-		if name := safeBaseName(parsed.Path); name != "" {
-			return name
+		path := strings.TrimSpace(parsed.Path)
+		if path != "" && path != "/" {
+			return safeURLArchiveBaseName(path)
 		}
 	}
 	name := strings.TrimSpace(plan.ToolKey)
@@ -76,15 +99,43 @@ func archiveFileName(plan VersionInstallPlan) string {
 	if version != "" {
 		name += "-" + version
 	}
-	return name + ".zip"
+	return safeArchiveBaseName(name + ".zip")
 }
 
-func safeBaseName(value string) string {
-	base := filepath.Base(strings.TrimSpace(value))
-	if base == "" || base == "." || base == string(filepath.Separator) {
-		return ""
+func safeArchiveBaseName(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("archive name is required")
 	}
-	return base
+	if strings.ContainsAny(value, `/\`) {
+		return "", fmt.Errorf("invalid archive name: %s", value)
+	}
+	if filepath.VolumeName(value) != "" || windowsVolumeName(value) != "" {
+		return "", fmt.Errorf("invalid archive name: %s", value)
+	}
+	if value == "." || value == ".." {
+		return "", fmt.Errorf("invalid archive name: %s", value)
+	}
+	return value, nil
+}
+
+func safeURLArchiveBaseName(value string) (string, error) {
+	normalized := strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	segments := strings.Split(normalized, "/")
+	base := ""
+	for _, segment := range segments {
+		if segment == "" {
+			continue
+		}
+		if segment == "." || segment == ".." || strings.Contains(segment, ":") || windowsVolumeName(segment) != "" {
+			return "", fmt.Errorf("invalid archive name: %s", value)
+		}
+		base = segment
+	}
+	if base == "" {
+		return "", fmt.Errorf("invalid archive name: %s", value)
+	}
+	return safeArchiveBaseName(base)
 }
 
 func extractZip(archivePath string, targetDir string) error {
@@ -95,15 +146,23 @@ func extractZip(archivePath string, targetDir string) error {
 	}
 	defer reader.Close()
 
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
+	targets, err := validateZipEntries(targetDir, reader.File)
+	if err != nil {
 		return err
 	}
 
+	parent := filepath.Dir(targetDir)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return err
+	}
+	stageDir, err := os.MkdirTemp(parent, ".devman-extract-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stageDir)
+
 	for _, entry := range reader.File {
-		targetPath, err := zipEntryTarget(targetDir, entry.Name)
-		if err != nil {
-			return err
-		}
+		targetPath := filepath.Join(stageDir, targets[entry.Name])
 		if entry.FileInfo().IsDir() {
 			if err := os.MkdirAll(targetPath, entry.Mode()); err != nil {
 				return err
@@ -147,28 +206,77 @@ func extractZip(archivePath string, targetDir string) error {
 			return err
 		}
 	}
+
+	if err := os.RemoveAll(targetDir); err != nil {
+		return err
+	}
+	if err := os.Rename(stageDir, targetDir); err != nil {
+		return err
+	}
 	return nil
 }
 
+func validateZipEntries(targetDir string, entries []*zip.File) (map[string]string, error) {
+	targets := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		rel, err := zipEntryRel(entry.Name)
+		if err != nil {
+			return nil, err
+		}
+		targetPath := filepath.Join(targetDir, rel)
+		relToTarget, err := filepath.Rel(targetDir, targetPath)
+		if err != nil {
+			return nil, err
+		}
+		if relToTarget == ".." || strings.HasPrefix(relToTarget, ".."+string(filepath.Separator)) || filepath.IsAbs(relToTarget) {
+			return nil, fmt.Errorf("invalid archive entry: %s", entry.Name)
+		}
+		targets[entry.Name] = rel
+	}
+	return targets, nil
+}
+
 func zipEntryTarget(targetDir string, entryName string) (string, error) {
+	rel, err := zipEntryRel(entryName)
+	if err != nil {
+		return "", err
+	}
+	targetPath := filepath.Join(targetDir, rel)
+	relToTarget, err := filepath.Rel(targetDir, targetPath)
+	if err != nil {
+		return "", err
+	}
+	if relToTarget == ".." || strings.HasPrefix(relToTarget, ".."+string(filepath.Separator)) || filepath.IsAbs(relToTarget) {
+		return "", fmt.Errorf("invalid archive entry: %s", entryName)
+	}
+	return targetPath, nil
+}
+
+func zipEntryRel(entryName string) (string, error) {
 	if strings.TrimSpace(entryName) == "" {
 		return "", fmt.Errorf("invalid archive entry: %s", entryName)
 	}
 	normalized := strings.ReplaceAll(entryName, "\\", "/")
-	if filepath.IsAbs(normalized) || strings.HasPrefix(normalized, "/") {
+	if strings.HasPrefix(normalized, "/") || strings.HasPrefix(normalized, `\`) || filepath.IsAbs(normalized) || windowsVolumeName(normalized) != "" {
 		return "", fmt.Errorf("invalid archive entry: %s", entryName)
 	}
 	cleanEntry := filepath.Clean(normalized)
-	if cleanEntry == "." || strings.HasPrefix(cleanEntry, ".."+string(filepath.Separator)) || cleanEntry == ".." {
+	cleanEntry = strings.ReplaceAll(cleanEntry, "\\", "/")
+	if cleanEntry == "." || cleanEntry == ".." || strings.HasPrefix(cleanEntry, "../") || strings.Contains(cleanEntry, "/../") {
 		return "", fmt.Errorf("invalid archive entry: %s", entryName)
 	}
-	targetPath := filepath.Join(targetDir, cleanEntry)
-	rel, err := filepath.Rel(targetDir, targetPath)
-	if err != nil {
-		return "", err
+	return filepath.FromSlash(cleanEntry), nil
+}
+
+func windowsVolumeName(path string) string {
+	if len(path) >= 2 && path[1] == ':' {
+		first := path[0]
+		if (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') {
+			return path[:2]
+		}
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("invalid archive entry: %s", entryName)
+	if strings.HasPrefix(path, "//") || strings.HasPrefix(path, `\\`) {
+		return string(path[0]) + string(path[1])
 	}
-	return targetPath, nil
+	return ""
 }
