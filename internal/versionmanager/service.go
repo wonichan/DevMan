@@ -27,6 +27,7 @@ func (s *Service) ListToolVersions() ([]ToolVersionState, error) {
 		state := ToolVersionState{
 			ToolKey:         tool.Key,
 			Name:            tool.Name,
+			LocalVersions:   []ManagedVersion{},
 			ManagerConflict: s.DetectVersionManager(tool.Key),
 		}
 		if s.reg != nil {
@@ -48,6 +49,9 @@ func (s *Service) ListToolVersions() ([]ToolVersionState, error) {
 }
 
 func (s *Service) PreviewVersionInstall(toolKey string, version string) (*VersionInstallPlan, error) {
+	if _, ok := ToolByKey(toolKey); !ok {
+		return nil, fmt.Errorf("unsupported tool: %s", toolKey)
+	}
 	if conflict := s.DetectVersionManager(toolKey); conflict != nil && conflict.Detected {
 		return nil, fmt.Errorf("%s is managed by %s; DevMan will not take over this tool", toolKey, conflict.Manager)
 	}
