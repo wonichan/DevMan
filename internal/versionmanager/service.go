@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type VersionRegistry interface {
@@ -17,13 +18,14 @@ type Service struct {
 	reg             VersionRegistry
 	env             Environment
 	versionProvider OfficialVersionProvider
+	downloader      Downloader
 }
 
 func NewService(reg VersionRegistry, env Environment) *Service {
 	if env == nil {
 		env = RealEnvironment{}
 	}
-	return &Service{reg: reg, env: env, versionProvider: HTTPVersionProvider{}}
+	return &Service{reg: reg, env: env, versionProvider: HTTPVersionProvider{}, downloader: HTTPDownloader{}}
 }
 
 func (s *Service) ListToolVersions() ([]ToolVersionState, error) {
@@ -69,6 +71,74 @@ func (s *Service) FetchOfficialVersions(toolKey string) (*ToolVersionCatalog, er
 		provider = HTTPVersionProvider{}
 	}
 	return provider.Fetch(toolKey)
+}
+
+func (s *Service) InstallVersion(toolKey string, version string, targetDir string) (*VersionOperationResult, error) {
+	plan, err := s.PreviewVersionInstall(toolKey, version)
+	if err != nil {
+		return nil, err
+	}
+	tool, ok := ToolByKey(plan.ToolKey)
+	if !ok {
+		return nil, fmt.Errorf("unsupported tool: %s", plan.ToolKey)
+	}
+	if strings.TrimSpace(targetDir) != "" {
+		plan.TargetDir = filepath.Clean(targetDir)
+		plan.ExtractedDir = plan.TargetDir
+	}
+	if strings.TrimSpace(plan.ArchiveName) == "" {
+		plan.ArchiveName = archiveFileName(*plan)
+	}
+
+	downloader := s.downloader
+	if downloader == nil {
+		downloader = HTTPDownloader{}
+	}
+	if err := downloader.DownloadAndExtract(*plan); err != nil {
+		return nil, err
+	}
+
+	binPath, err := firstShimTarget(tool.Key, plan.TargetDir)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	if s.reg != nil {
+		managed := &ManagedVersion{
+			ToolKey:      tool.Key,
+			Version:      plan.Version,
+			InstallPath:  plan.TargetDir,
+			BinPath:      binPath,
+			Source:       SourceDevMan,
+			IsDefault:    false,
+			IsActive:     false,
+			CanDelete:    true,
+			DeletePolicy: DeletePolicyDirect,
+			DetectedAt:   now,
+		}
+		if err := s.reg.SaveToolVersion(managed); err != nil {
+			return nil, err
+		}
+		if err := s.reg.SaveInstallStrategy(InstallStrategy{
+			ToolKey:   tool.Key,
+			RootDir:   filepath.Dir(plan.TargetDir),
+			Reason:    plan.ResolverReason,
+			UpdatedAt: now,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	return &VersionOperationResult{
+		Success:       true,
+		Message:       "version installed",
+		ToolKey:       tool.Key,
+		Version:       plan.Version,
+		AffectedPaths: []string{plan.TargetDir},
+		AffectedEnvironment: map[string]string{
+			tool.EnvVar: plan.TargetDir,
+		},
+	}, nil
 }
 
 func (s *Service) SwitchVersion(version ManagedVersion) (*VersionOperationResult, error) {
@@ -215,6 +285,21 @@ func primaryShimTarget(tool ToolDefinition, targets map[string]string) (string, 
 	primaryShim := strings.TrimSuffix(tool.PrimaryExe, filepath.Ext(tool.PrimaryExe)) + ".cmd"
 	target, ok := targets[primaryShim]
 	return target, ok
+}
+
+func firstShimTarget(toolKey string, installPath string) (string, error) {
+	tool, ok := ToolByKey(toolKey)
+	if !ok {
+		return "", fmt.Errorf("unsupported tool: %s", toolKey)
+	}
+	targets, err := ShimTargets(tool.Key, installPath)
+	if err != nil {
+		return "", err
+	}
+	if target, ok := primaryShimTarget(tool, targets); ok {
+		return target, nil
+	}
+	return "", fmt.Errorf("primary shim target not found for %s", tool.Key)
 }
 
 func (s *Service) DetectVersionManager(toolKey string) *VersionManagerConflict {

@@ -361,6 +361,22 @@ func (a *App) PreviewVersionInstall(toolKey string, version string) (*versionman
 	return plan, nil
 }
 
+// InstallVersion downloads, extracts, and records a DevMan-managed tool version.
+func (a *App) InstallVersion(toolKey string, version string, targetDir string) (*versionmanager.VersionOperationResult, error) {
+	logrus.WithFields(logrus.Fields{"tool_key": toolKey, "version": version, "target_dir": targetDir}).Info("install version requested")
+	if a.versionManager == nil {
+		logrus.Error("install version failed: version manager not initialized")
+		return nil, fmt.Errorf("version manager not initialized")
+	}
+	result, err := a.versionManager.InstallVersion(toolKey, version, targetDir)
+	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"tool_key": toolKey, "version": version, "target_dir": targetDir}).Warn("install version failed")
+		return nil, err
+	}
+	logrus.WithFields(logrus.Fields{"tool_key": toolKey, "version": version, "target_dir": targetDir}).Info("install version completed")
+	return result, nil
+}
+
 // FetchOfficialVersions retrieves available versions from the tool's official source.
 func (a *App) FetchOfficialVersions(toolKey string) (*versionmanager.ToolVersionCatalog, error) {
 	logrus.WithField("tool_key", toolKey).Info("fetch official versions requested")
