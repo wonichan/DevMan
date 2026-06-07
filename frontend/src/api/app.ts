@@ -24,9 +24,11 @@ import type {
   AppSettings,
   MigrationResult,
   MetricSnapshot,
+  ToolVersionCatalog,
   ToolVersionState,
   VersionInstallPlan,
   VersionManagerConflict,
+  VersionOperationResult,
 } from '../devman-types';
 
 export function ScanAll(): Promise<EnvSummary[]> {
@@ -76,9 +78,13 @@ interface WailsRuntime {
 }
 
 interface AppBridge {
+  FetchOfficialVersions?: (toolKey: string) => Promise<ToolVersionCatalog>;
+  InstallVersion?: (toolKey: string, version: string, targetDir: string) => Promise<VersionOperationResult>;
   ListToolVersions?: () => Promise<ToolVersionState[]>;
   PreviewVersionInstall?: (toolKey: string, version: string) => Promise<VersionInstallPlan>;
   DetectVersionManager?: (toolKey: string) => Promise<VersionManagerConflict | null>;
+  SwitchVersion?: (toolKey: string, instanceId: number) => Promise<VersionOperationResult>;
+  UninstallVersion?: (instanceId: number, forceDeleteExternal: boolean) => Promise<VersionOperationResult>;
 }
 
 declare global {
@@ -123,14 +129,38 @@ export function ListToolVersions(): Promise<ToolVersionState[]> {
   return appBridge()?.ListToolVersions?.() ?? Promise.resolve([]);
 }
 
+export function FetchOfficialVersions(toolKey: string): Promise<ToolVersionCatalog> {
+  const fetchOfficialVersions = appBridge()?.FetchOfficialVersions;
+  if (!fetchOfficialVersions) return Promise.reject(new Error('Official version API is not ready'));
+  return fetchOfficialVersions(toolKey);
+}
+
 export function PreviewVersionInstall(toolKey: string, version: string): Promise<VersionInstallPlan> {
   const preview = appBridge()?.PreviewVersionInstall;
   if (!preview) return Promise.reject(new Error('Version management API is not ready'));
   return preview(toolKey, version);
 }
 
+export function InstallVersion(toolKey: string, version: string, targetDir: string): Promise<VersionOperationResult> {
+  const installVersion = appBridge()?.InstallVersion;
+  if (!installVersion) return Promise.reject(new Error('Install API is not ready'));
+  return installVersion(toolKey, version, targetDir);
+}
+
 export function DetectVersionManager(toolKey: string): Promise<VersionManagerConflict | null> {
   return appBridge()?.DetectVersionManager?.(toolKey) ?? Promise.resolve(null);
+}
+
+export function SwitchVersion(toolKey: string, instanceId: number): Promise<VersionOperationResult> {
+  const switchVersion = appBridge()?.SwitchVersion;
+  if (!switchVersion) return Promise.reject(new Error('Switch API is not ready'));
+  return switchVersion(toolKey, instanceId);
+}
+
+export function UninstallVersion(instanceId: number, forceDeleteExternal: boolean): Promise<VersionOperationResult> {
+  const uninstallVersion = appBridge()?.UninstallVersion;
+  if (!uninstallVersion) return Promise.reject(new Error('Uninstall API is not ready'));
+  return uninstallVersion(instanceId, forceDeleteExternal);
 }
 
 export function EventsOn(eventName: string, callback: (...data: unknown[]) => void): () => void {

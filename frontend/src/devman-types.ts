@@ -112,6 +112,13 @@ export interface AvailableVersion {
   Checksum: string;
 }
 
+export interface ToolVersionCatalog {
+  ToolKey: string;
+  Versions: AvailableVersion[];
+  FetchedAt: string;
+  SourceUrl: string;
+}
+
 export interface ManagedVersion {
   Id: number;
   ToolKey: string;
@@ -143,6 +150,18 @@ export interface VersionInstallPlan {
   WillOverwrite: boolean;
   ResolverReason: string;
   EnvironmentChanges: Record<string, string>;
+}
+
+export interface VersionOperationResult {
+  Success: boolean;
+  Message: string;
+  ToolKey: string;
+  Version: string;
+  AffectedPaths: string[];
+  AffectedEnvironment: Record<string, string>;
+  RollbackAvailable: boolean;
+  VerificationCommand: string;
+  VerificationOutput: string;
 }
 
 export interface ToolVersionState {
