@@ -24,6 +24,9 @@ import type {
   AppSettings,
   MigrationResult,
   MetricSnapshot,
+  ToolVersionState,
+  VersionInstallPlan,
+  VersionManagerConflict,
 } from '../devman-types';
 
 export function ScanAll(): Promise<EnvSummary[]> {
@@ -72,9 +75,15 @@ interface WailsRuntime {
   EventsOn(eventName: string, callback: (...data: unknown[]) => void): () => void;
 }
 
+interface AppBridge {
+  ListToolVersions?: () => Promise<ToolVersionState[]>;
+  PreviewVersionInstall?: (toolKey: string, version: string) => Promise<VersionInstallPlan>;
+  DetectVersionManager?: (toolKey: string) => Promise<VersionManagerConflict | null>;
+}
+
 declare global {
   interface Window {
-    go?: unknown;
+    go?: any;
     runtime?: WailsRuntime;
   }
 }
@@ -90,6 +99,11 @@ function hasWailsBridge(): boolean {
   return typeof window !== 'undefined' && Boolean(window.go);
 }
 
+function appBridge(): AppBridge | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return (window.go as { main?: { App?: AppBridge } } | undefined)?.main?.App;
+}
+
 export function GetSettings(): Promise<AppSettings> {
   if (!hasWailsBridge()) return Promise.resolve(defaultSettings);
   return _GetSettings() as Promise<AppSettings>;
@@ -103,6 +117,20 @@ export function SaveSettings(settings: AppSettings): Promise<void> {
 export function GetMetricSnapshots(metricKey: string, targetKey: string, limit: number): Promise<MetricSnapshot[]> {
   if (!hasWailsBridge()) return Promise.resolve([]);
   return _GetMetricSnapshots(metricKey, targetKey, limit) as Promise<MetricSnapshot[]>;
+}
+
+export function ListToolVersions(): Promise<ToolVersionState[]> {
+  return appBridge()?.ListToolVersions?.() ?? Promise.resolve([]);
+}
+
+export function PreviewVersionInstall(toolKey: string, version: string): Promise<VersionInstallPlan> {
+  const preview = appBridge()?.PreviewVersionInstall;
+  if (!preview) return Promise.reject(new Error('Version management API is not ready'));
+  return preview(toolKey, version);
+}
+
+export function DetectVersionManager(toolKey: string): Promise<VersionManagerConflict | null> {
+  return appBridge()?.DetectVersionManager?.(toolKey) ?? Promise.resolve(null);
 }
 
 export function EventsOn(eventName: string, callback: (...data: unknown[]) => void): () => void {

@@ -100,3 +100,58 @@ export interface MetricSnapshot {
   ValueBytes: number;
   CapturedAt: string;
 }
+
+export type VersionSource = 'devman' | 'external' | 'version_manager';
+
+export interface AvailableVersion {
+  Version: string;
+  Stable: boolean;
+  ReleaseDate: string;
+  Arch: string;
+  DownloadUrl: string;
+  Checksum: string;
+}
+
+export interface ManagedVersion {
+  Id: number;
+  ToolKey: string;
+  Version: string;
+  InstallPath: string;
+  BinPath: string;
+  Source: VersionSource;
+  IsDefault: boolean;
+  IsActive: boolean;
+  CanDelete: boolean;
+  DeletePolicy: string;
+  DetectedAt: string;
+}
+
+export interface VersionManagerConflict {
+  ToolKey: string;
+  Manager: string;
+  Evidence: string;
+  Detected: boolean;
+}
+
+export interface VersionInstallPlan {
+  ToolKey: string;
+  Version: string;
+  TargetDir: string;
+  DownloadUrl: string;
+  ArchiveName: string;
+  ExtractedDir: string;
+  WillOverwrite: boolean;
+  ResolverReason: string;
+  EnvironmentChanges: Record<string, string>;
+}
+
+export interface ToolVersionState {
+  ToolKey: string;
+  Name: string;
+  LocalVersions: ManagedVersion[];
+  CurrentDefault?: ManagedVersion;
+  ActiveCommand: string;
+  PathConflict: string;
+  ManagerConflict?: VersionManagerConflict;
+  LastInstallPlan?: VersionInstallPlan;
+}

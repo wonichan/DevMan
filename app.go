@@ -7,6 +7,7 @@ import (
 	"devman/internal/registry"
 	"devman/internal/scanner"
 	"devman/internal/utils"
+	"devman/internal/versionmanager"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,11 +20,12 @@ import (
 )
 
 type App struct {
-	ctx      context.Context
-	reg      *registry.Registry
-	engine   *scanner.Engine
-	migrator *migrator.Engine
-	scanMu   sync.Mutex
+	ctx            context.Context
+	reg            *registry.Registry
+	engine         *scanner.Engine
+	migrator       *migrator.Engine
+	versionManager *versionmanager.Service
+	scanMu         sync.Mutex
 }
 
 func NewApp() *App {
@@ -54,6 +56,7 @@ func (a *App) startup(ctx context.Context) {
 	a.reg = reg
 	a.engine = scanner.NewEngine(reg)
 	a.migrator = migrator.New(reg)
+	a.versionManager = versionmanager.NewService(reg, versionmanager.RealEnvironment{})
 	logrus.Info("application startup complete")
 }
 
@@ -326,6 +329,45 @@ func (a *App) GetMetricSnapshots(metricKey string, targetKey string, limit int) 
 	}
 	logrus.WithFields(logrus.Fields{"metric_key": metricKey, "target_key": targetKey, "count": len(snapshots)}).Info("get metric snapshots completed")
 	return snapshots, nil
+}
+
+// ListToolVersions returns supported version-managed tools and known local versions.
+func (a *App) ListToolVersions() ([]versionmanager.ToolVersionState, error) {
+	if a.versionManager == nil {
+		logrus.Error("list tool versions failed: version manager not initialized")
+		return nil, fmt.Errorf("version manager not initialized")
+	}
+	states, err := a.versionManager.ListToolVersions()
+	if err != nil {
+		logrus.WithError(err).Error("list tool versions failed")
+		return nil, err
+	}
+	logrus.WithField("tool_count", len(states)).Info("list tool versions completed")
+	return states, nil
+}
+
+// PreviewVersionInstall resolves where a version install would be placed.
+func (a *App) PreviewVersionInstall(toolKey string, version string) (*versionmanager.VersionInstallPlan, error) {
+	logrus.WithFields(logrus.Fields{"tool_key": toolKey, "version": version}).Info("preview version install requested")
+	if a.versionManager == nil {
+		logrus.Error("preview version install failed: version manager not initialized")
+		return nil, fmt.Errorf("version manager not initialized")
+	}
+	plan, err := a.versionManager.PreviewVersionInstall(toolKey, version)
+	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"tool_key": toolKey, "version": version}).Warn("preview version install failed")
+		return nil, err
+	}
+	return plan, nil
+}
+
+// DetectVersionManager reports external version-manager ownership for a tool.
+func (a *App) DetectVersionManager(toolKey string) *versionmanager.VersionManagerConflict {
+	if a.versionManager == nil {
+		logrus.WithField("tool_key", toolKey).Warn("detect version manager skipped: version manager not initialized")
+		return nil
+	}
+	return a.versionManager.DetectVersionManager(toolKey)
 }
 
 // AnalyzeCleanable returns items that can be safely cleaned
