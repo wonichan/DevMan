@@ -134,6 +134,44 @@ func TestSwitchVersionVerificationFailureDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestSwitchVersionVerificationFailureDoesNotPersistVersionState(t *testing.T) {
+	env := newFakeEnvironment()
+	env.exeDir = `D:\apps\DevMan`
+	env.files[`D:\production\go1.26\bin\go.exe`] = true
+	env.runErr = errFakeRunFailed()
+	reg := newFakeVersionRegistry([]ManagedVersion{
+		{
+			ID:          1,
+			ToolKey:     "go",
+			Version:     "1.25.0",
+			InstallPath: `D:\production\go1.25`,
+			IsDefault:   true,
+			IsActive:    true,
+		},
+		{
+			ID:          2,
+			ToolKey:     "go",
+			Version:     "1.26.0",
+			InstallPath: `D:\production\go1.26`,
+		},
+	})
+
+	_, err := NewService(reg, env).SwitchVersion(reg.versions[1])
+	if err == nil {
+		t.Fatal("expected verification error")
+	}
+	if len(reg.saved) != 0 {
+		t.Fatalf("versions were saved before full success: %#v", reg.saved)
+	}
+	if !reg.versions[0].IsDefault || !reg.versions[0].IsActive {
+		t.Fatalf("existing version state changed: default:%t active:%t", reg.versions[0].IsDefault, reg.versions[0].IsActive)
+	}
+	if reg.versions[1].IsDefault || reg.versions[1].IsActive {
+		t.Fatalf("selected version state changed before full success: default:%t active:%t", reg.versions[1].IsDefault, reg.versions[1].IsActive)
+	}
+	env.assertNoMutation(t)
+}
+
 func TestSwitchVersionRejectsBadInstallPathBeforeMutation(t *testing.T) {
 	tests := []struct {
 		name        string
