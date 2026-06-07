@@ -1,0 +1,14 @@
+[
+  {
+    "version": "go1.25.0",
+    "stable": true,
+    "files": [
+      {
+        "filename": "go1.25.0.windows-amd64.zip",
+        "os": "windows",
+        "arch": "amd64",
+        "sha256": "abc123"
+      }
+    ]
+  }
+]

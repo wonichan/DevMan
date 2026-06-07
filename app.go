@@ -361,6 +361,22 @@ func (a *App) PreviewVersionInstall(toolKey string, version string) (*versionman
 	return plan, nil
 }
 
+// FetchOfficialVersions retrieves available versions from the tool's official source.
+func (a *App) FetchOfficialVersions(toolKey string) (*versionmanager.ToolVersionCatalog, error) {
+	logrus.WithField("tool_key", toolKey).Info("fetch official versions requested")
+	if a.versionManager == nil {
+		logrus.Error("fetch official versions failed: version manager not initialized")
+		return nil, fmt.Errorf("version manager not initialized")
+	}
+	catalog, err := a.versionManager.FetchOfficialVersions(toolKey)
+	if err != nil {
+		logrus.WithError(err).WithField("tool_key", toolKey).Warn("fetch official versions failed")
+		return nil, err
+	}
+	logrus.WithFields(logrus.Fields{"tool_key": toolKey, "version_count": len(catalog.Versions)}).Info("fetch official versions completed")
+	return catalog, nil
+}
+
 // SwitchVersion makes a tracked tool version the active user version through DevMan shims.
 func (a *App) SwitchVersion(toolKey string, instanceId int64) (*versionmanager.VersionOperationResult, error) {
 	logrus.WithFields(logrus.Fields{"tool_key": toolKey, "instance_id": instanceId}).Info("switch version requested")

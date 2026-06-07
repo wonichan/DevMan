@@ -62,6 +62,10 @@ func (s *Service) PreviewVersionInstall(toolKey string, version string) (*Versio
 	return ResolveInstallRoot(s.env, toolKey, version)
 }
 
+func (s *Service) FetchOfficialVersions(toolKey string) (*ToolVersionCatalog, error) {
+	return HTTPVersionProvider{}.Fetch(toolKey)
+}
+
 func (s *Service) SwitchVersion(version ManagedVersion) (*VersionOperationResult, error) {
 	tool, ok := ToolByKey(version.ToolKey)
 	if !ok {
