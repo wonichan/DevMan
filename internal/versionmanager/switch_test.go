@@ -66,6 +66,51 @@ func TestSwitchVersionWritesShimsAndEnvironment(t *testing.T) {
 	}
 }
 
+func TestSwitchVersionPersistsSelectedDefaultAndActiveAfterSuccess(t *testing.T) {
+	env := newFakeEnvironment()
+	env.exeDir = `D:\apps\DevMan`
+	env.files[`D:\production\go1.26\bin\go.exe`] = true
+	reg := newFakeVersionRegistry([]ManagedVersion{
+		{
+			ID:          1,
+			ToolKey:     "go",
+			Version:     "1.25.0",
+			InstallPath: `D:\production\go1.25`,
+			IsDefault:   true,
+			IsActive:    true,
+		},
+		{
+			ID:          2,
+			ToolKey:     "go",
+			Version:     "1.26.0",
+			InstallPath: `D:\production\go1.26`,
+		},
+	})
+
+	_, err := NewService(reg, env).SwitchVersion(reg.versions[1])
+	if err != nil {
+		t.Fatalf("SwitchVersion failed: %v", err)
+	}
+
+	if len(reg.saved) != 2 {
+		t.Fatalf("saved versions = %#v", reg.saved)
+	}
+	first := reg.savedByID(1)
+	if first == nil {
+		t.Fatal("version 1 was not saved")
+	}
+	if first.IsDefault || first.IsActive {
+		t.Fatalf("version 1 state = default:%t active:%t", first.IsDefault, first.IsActive)
+	}
+	selected := reg.savedByID(2)
+	if selected == nil {
+		t.Fatal("version 2 was not saved")
+	}
+	if !selected.IsDefault || !selected.IsActive {
+		t.Fatalf("version 2 state = default:%t active:%t", selected.IsDefault, selected.IsActive)
+	}
+}
+
 func TestSwitchVersionVerificationFailureDoesNotMutate(t *testing.T) {
 	env := newFakeEnvironment()
 	env.exeDir = `D:\apps\DevMan`
@@ -90,21 +135,40 @@ func TestSwitchVersionVerificationFailureDoesNotMutate(t *testing.T) {
 }
 
 func TestSwitchVersionRejectsBadInstallPathBeforeMutation(t *testing.T) {
-	env := newFakeEnvironment()
-	env.exeDir = `D:\apps\DevMan`
+	tests := []struct {
+		name        string
+		installPath string
+		wantError   string
+	}{
+		{name: "blank", installPath: "", wantError: "invalid install path: required"},
+		{name: "whitespace", installPath: "   ", wantError: "invalid install path: required"},
+		{name: "relative", installPath: `go1.26`, wantError: "invalid install path: must be absolute"},
+		{name: "drive root", installPath: `D:\`, wantError: "invalid install path: must not be drive root"},
+		{name: "filesystem root", installPath: `\`, wantError: "invalid install path: must be absolute"},
+		{name: "quote", installPath: `D:\production\go"1.26`, wantError: "invalid install path: contains quote"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newFakeEnvironment()
+			env.exeDir = `D:\apps\DevMan`
 
-	_, err := NewService(nil, env).SwitchVersion(ManagedVersion{
-		ToolKey:     "go",
-		Version:     "1.26.0",
-		InstallPath: `go1.26`,
-	})
-	if err == nil {
-		t.Fatal("expected install path error")
+			_, err := NewService(nil, env).SwitchVersion(ManagedVersion{
+				ToolKey:     "go",
+				Version:     "1.26.0",
+				InstallPath: tt.installPath,
+			})
+			if err == nil {
+				t.Fatal("expected install path error")
+			}
+			if err.Error() != tt.wantError {
+				t.Fatalf("error = %q, want %q", err, tt.wantError)
+			}
+			if len(env.runCommands) != 0 {
+				t.Fatalf("run commands occurred before install path validation completed: %#v", env.runCommands)
+			}
+			env.assertNoMutation(t)
+		})
 	}
-	if err.Error() != "invalid install path: must be absolute" {
-		t.Fatalf("error = %q", err)
-	}
-	env.assertNoMutation(t)
 }
 
 func TestSwitchVersionRejectsMissingExecutableBeforeMutation(t *testing.T) {

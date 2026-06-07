@@ -132,6 +132,9 @@ func (s *Service) SwitchVersion(version ManagedVersion) (*VersionOperationResult
 	if err := mutable.EnsureUserPathEntry(shimPathEntry); err != nil {
 		return nil, err
 	}
+	if err := s.persistSwitchedVersionState(version); err != nil {
+		return nil, err
+	}
 
 	return &VersionOperationResult{
 		Success:       true,
@@ -148,6 +151,24 @@ func (s *Service) SwitchVersion(version ManagedVersion) (*VersionOperationResult
 		VerificationCommand: verificationCommand,
 		VerificationOutput:  verificationOutput,
 	}, nil
+}
+
+func (s *Service) persistSwitchedVersionState(selected ManagedVersion) error {
+	if s.reg == nil {
+		return nil
+	}
+	versions, err := s.reg.ListToolVersions(selected.ToolKey)
+	if err != nil {
+		return err
+	}
+	for _, version := range versions {
+		version.IsDefault = version.ID == selected.ID
+		version.IsActive = version.ID == selected.ID
+		if err := s.reg.SaveToolVersion(&version); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateInstallPath(path string) error {
