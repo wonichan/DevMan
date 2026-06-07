@@ -22,6 +22,14 @@ func (p HTTPVersionProvider) Fetch(toolKey string) (*ToolVersionCatalog, error) 
 	if sourceURL == "" {
 		return nil, fmt.Errorf("unsupported tool: %s", toolKey)
 	}
+	if toolKey == "bun" || toolKey == "flutter" {
+		return &ToolVersionCatalog{
+			ToolKey:   toolKey,
+			Versions:  []AvailableVersion{},
+			FetchedAt: time.Now(),
+			SourceURL: sourceURL,
+		}, nil
+	}
 
 	client := p.Client
 	if client == nil {
@@ -47,8 +55,6 @@ func (p HTTPVersionProvider) Fetch(toolKey string) (*ToolVersionCatalog, error) 
 		versions, err = ParseGoVersions(data)
 	case "node":
 		versions, err = ParseNodeVersions(data)
-	case "bun", "flutter":
-		versions = []AvailableVersion{}
 	}
 	if err != nil {
 		return nil, err
@@ -123,7 +129,7 @@ func ParseGoVersions(data []byte) ([]AvailableVersion, error) {
 		return nil, err
 	}
 
-	var versions []AvailableVersion
+	versions := make([]AvailableVersion, 0, len(releases))
 	for _, release := range releases {
 		version := strings.TrimPrefix(release.Version, "go")
 		for _, file := range release.Files {

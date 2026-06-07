@@ -1,6 +1,10 @@
 package versionmanager
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+	"time"
+)
 
 func TestPreviewInstallBlocksVersionManagerOwnedTool(t *testing.T) {
 	env := newFakeEnvironment()
@@ -58,4 +62,42 @@ func TestListToolVersionsReturnsNonNilEmptyLocalVersions(t *testing.T) {
 			t.Fatalf("%s LocalVersions length = %d", state.ToolKey, len(state.LocalVersions))
 		}
 	}
+}
+
+func TestFetchOfficialVersionsUsesInjectedProvider(t *testing.T) {
+	service := NewService(nil, newFakeEnvironment())
+	service.versionProvider = fakeOfficialVersionProvider{
+		catalog: &ToolVersionCatalog{
+			ToolKey:   "go",
+			Versions:  []AvailableVersion{{Version: "1.25.0"}},
+			FetchedAt: time.Now(),
+			SourceURL: "fake://go",
+		},
+	}
+
+	catalog, err := service.FetchOfficialVersions("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalog.ToolKey != "go" {
+		t.Fatalf("ToolKey = %q", catalog.ToolKey)
+	}
+	if len(catalog.Versions) != 1 {
+		t.Fatalf("expected 1 version, got %d", len(catalog.Versions))
+	}
+}
+
+type fakeOfficialVersionProvider struct {
+	catalog *ToolVersionCatalog
+	err     error
+}
+
+func (p fakeOfficialVersionProvider) Fetch(toolKey string) (*ToolVersionCatalog, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	if p.catalog == nil {
+		return nil, fmt.Errorf("no fake catalog for %s", toolKey)
+	}
+	return p.catalog, nil
 }

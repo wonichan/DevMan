@@ -14,15 +14,16 @@ type VersionRegistry interface {
 }
 
 type Service struct {
-	reg VersionRegistry
-	env Environment
+	reg             VersionRegistry
+	env             Environment
+	versionProvider OfficialVersionProvider
 }
 
 func NewService(reg VersionRegistry, env Environment) *Service {
 	if env == nil {
 		env = RealEnvironment{}
 	}
-	return &Service{reg: reg, env: env}
+	return &Service{reg: reg, env: env, versionProvider: HTTPVersionProvider{}}
 }
 
 func (s *Service) ListToolVersions() ([]ToolVersionState, error) {
@@ -63,7 +64,11 @@ func (s *Service) PreviewVersionInstall(toolKey string, version string) (*Versio
 }
 
 func (s *Service) FetchOfficialVersions(toolKey string) (*ToolVersionCatalog, error) {
-	return HTTPVersionProvider{}.Fetch(toolKey)
+	provider := s.versionProvider
+	if provider == nil {
+		provider = HTTPVersionProvider{}
+	}
+	return provider.Fetch(toolKey)
 }
 
 func (s *Service) SwitchVersion(version ManagedVersion) (*VersionOperationResult, error) {
