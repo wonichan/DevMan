@@ -16,7 +16,9 @@ type fakeEnvironment struct {
 	exeDir          string
 	runOutput       string
 	runErr          error
+	removeErr       error
 	runCommands     []fakeRunCommand
+	removedPaths    []string
 	userPathEntries []string
 	userEnvSets     map[string]string
 }
@@ -88,6 +90,11 @@ func (f *fakeEnvironment) Run(command string, args ...string) (string, error) {
 	return f.runOutput, f.runErr
 }
 
+func (f *fakeEnvironment) RemoveAll(path string) error {
+	f.removedPaths = append(f.removedPaths, path)
+	return f.removeErr
+}
+
 func (f *fakeEnvironment) assertNoMutation(t testingT) {
 	t.Helper()
 	if len(f.writes) != 0 {
@@ -101,6 +108,9 @@ func (f *fakeEnvironment) assertNoMutation(t testingT) {
 	}
 	if len(f.userEnvSets) != 0 {
 		t.Fatalf("user env writes occurred before validation completed: %#v", f.userEnvSets)
+	}
+	if len(f.removedPaths) != 0 {
+		t.Fatalf("paths were removed before validation completed: %#v", f.removedPaths)
 	}
 }
 

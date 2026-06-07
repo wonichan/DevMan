@@ -21,6 +21,7 @@ type MutableEnvironment interface {
 	SetUserEnv(key string, value string) error
 	EnsureUserPathEntry(entry string) error
 	Run(command string, args ...string) (string, error)
+	RemoveAll(path string) error
 }
 
 type RealEnvironment struct{}
@@ -74,4 +75,8 @@ func (RealEnvironment) EnsureUserPathEntry(entry string) error {
 func (RealEnvironment) Run(command string, args ...string) (string, error) {
 	output, err := exec.Command(command, args...).CombinedOutput()
 	return string(output), err
+}
+
+func (RealEnvironment) RemoveAll(path string) error {
+	return os.RemoveAll(path)
 }

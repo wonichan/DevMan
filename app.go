@@ -425,6 +425,40 @@ func (a *App) SwitchVersion(toolKey string, instanceId int64) (*versionmanager.V
 	return nil, fmt.Errorf("version not found: %d", instanceId)
 }
 
+// UninstallVersion removes a tracked tool version according to its delete policy.
+func (a *App) UninstallVersion(instanceId int64, forceDeleteExternal bool) (*versionmanager.VersionOperationResult, error) {
+	logrus.WithFields(logrus.Fields{"instance_id": instanceId, "force_delete_external": forceDeleteExternal}).Info("uninstall version requested")
+	if a.versionManager == nil {
+		logrus.Error("uninstall version failed: version manager not initialized")
+		return nil, fmt.Errorf("version manager not initialized")
+	}
+	if a.reg == nil {
+		logrus.Error("uninstall version failed: registry not initialized")
+		return nil, fmt.Errorf("registry not initialized")
+	}
+
+	for _, tool := range versionmanager.SupportedTools() {
+		versions, err := a.reg.ListToolVersions(tool.Key)
+		if err != nil {
+			logrus.WithError(err).WithField("tool_key", tool.Key).Error("uninstall version failed to list versions")
+			return nil, err
+		}
+		for _, version := range versions {
+			if version.ID == instanceId {
+				result, err := a.versionManager.UninstallVersion(version, forceDeleteExternal)
+				if err != nil {
+					logrus.WithError(err).WithFields(logrus.Fields{"tool_key": version.ToolKey, "instance_id": instanceId}).Warn("uninstall version failed")
+					return nil, err
+				}
+				logrus.WithFields(logrus.Fields{"tool_key": version.ToolKey, "instance_id": instanceId}).Info("uninstall version completed")
+				return result, nil
+			}
+		}
+	}
+	logrus.WithField("instance_id", instanceId).Warn("uninstall version failed: version not found")
+	return nil, fmt.Errorf("version not found: %d", instanceId)
+}
+
 // DetectVersionManager reports external version-manager ownership for a tool.
 func (a *App) DetectVersionManager(toolKey string) *versionmanager.VersionManagerConflict {
 	if a.versionManager == nil {
