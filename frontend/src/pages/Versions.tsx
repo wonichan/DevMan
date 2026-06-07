@@ -21,7 +21,7 @@ import type {
   VersionInstallPlan,
   VersionOperationResult,
 } from '../devman-types';
-import { conflictLabel } from '../utils/version-management';
+import { conflictLabel, versionSourceLabel } from '../utils/version-management';
 
 const preferredToolOrder = ['go', 'node', 'bun', 'flutter'];
 
@@ -44,18 +44,6 @@ function formatToolName(tool: ToolVersionState) {
   return tool.Name || tool.ToolKey;
 }
 
-function versionSourceLabel(source: ManagedVersion['Source']): string {
-  switch (source) {
-    case 'devman':
-      return 'DevMan';
-    case 'version_manager':
-      return '版本管理器';
-    case 'external':
-    default:
-      return '外部';
-  }
-}
-
 function formatDate(value?: string) {
   if (!value) return '未知日期';
   return value.slice(0, 10);
@@ -63,6 +51,13 @@ function formatDate(value?: string) {
 
 function affectedEnvironmentEntries(result: VersionOperationResult) {
   return Object.entries(result.AffectedEnvironment || {});
+}
+
+function versionCanBeUninstalled(version: ManagedVersion) {
+  if (version.IsDefault || version.IsActive) return false;
+  if (version.Source === 'version_manager') return false;
+  if (version.Source === 'external') return true;
+  return version.CanDelete || version.DeletePolicy === 'direct';
 }
 
 export default function Versions() {
@@ -78,16 +73,29 @@ export default function Versions() {
 
   const orderedTools = useMemo(() => sortTools(tools || []), [tools]);
   const activeTool = orderedTools.find((tool) => tool.ToolKey === activeToolKey);
-  const localVersions = activeTool?.LocalVersions || [];
+  const localVersions = activeTool && Array.isArray(activeTool.LocalVersions) ? activeTool.LocalVersions : [];
   const activeConflict = conflictLabel(activeTool?.ManagerConflict);
   const hasManagerConflict = Boolean(activeConflict);
   const canPlanInstall = Boolean(previewVersion.trim()) && !hasManagerConflict && !actionKey;
+
+  const showOperationResult = (
+    result: VersionOperationResult,
+    successTitle: string,
+    failureTitle: string,
+  ) => {
+    setOperationResult(result);
+    if (result.Success) {
+      success(successTitle, result.Message);
+      return;
+    }
+    error(failureTitle, result.Message || '后端返回操作失败。');
+  };
 
   const loadData = async () => {
     setLoading(true);
     try {
       const data = await ListToolVersions();
-      const list = data || [];
+      const list = Array.isArray(data) ? data : [];
       setTools(list);
       setActiveToolKey((currentKey) => {
         if (list.some((tool) => tool.ToolKey === currentKey)) return currentKey;
@@ -115,7 +123,7 @@ export default function Versions() {
     setActionKey('fetch-official');
     try {
       const catalog = await FetchOfficialVersions(activeToolKey);
-      setOfficialVersions(catalog?.Versions || []);
+      setOfficialVersions(Array.isArray(catalog?.Versions) ? catalog.Versions : []);
       success('官方版本已刷新');
     } catch (e: unknown) {
       error('官方版本查询失败', e instanceof Error ? e.message : String(e));
@@ -133,7 +141,7 @@ export default function Versions() {
     const version = previewVersion.trim();
     if (!version) return;
     if (hasManagerConflict) {
-      error('无法生成安装预览', activeConflict || '检测到外部版本管理器');
+      error('无法生成安装预览', activeConflict || '检测到外部版本管理器。');
       return;
     }
 
@@ -142,7 +150,7 @@ export default function Versions() {
     try {
       const plan = await PreviewVersionInstall(activeToolKey, version);
       setInstallPlan(plan);
-      success('安装预览已生成', plan.ResolverReason || '已解析目标安装路径');
+      success('安装预览已生成', plan.ResolverReason || '已解析目标安装路径。');
     } catch (e: unknown) {
       error('生成安装预览失败', e instanceof Error ? e.message : String(e));
     } finally {
@@ -155,8 +163,7 @@ export default function Versions() {
     setActionKey('install');
     try {
       const result = await InstallVersion(installPlan.ToolKey, installPlan.Version, installPlan.TargetDir);
-      setOperationResult(result);
-      success('安装完成', result.Message);
+      showOperationResult(result, '安装完成', '安装失败');
       setInstallPlan(null);
       await loadData();
     } catch (e: unknown) {
@@ -171,8 +178,7 @@ export default function Versions() {
     setActionKey(`switch-${version.Id}`);
     try {
       const result = await SwitchVersion(version.ToolKey, version.Id);
-      setOperationResult(result);
-      success('切换完成', result.Message);
+      showOperationResult(result, '切换完成', '切换失败');
       await loadData();
     } catch (e: unknown) {
       error('切换失败', e instanceof Error ? e.message : String(e));
@@ -184,6 +190,14 @@ export default function Versions() {
   const handleUninstall = async (version: ManagedVersion, force: boolean) => {
     if (version.IsDefault || version.IsActive) {
       error('无法卸载当前使用的版本', '请先切换到其他版本后再卸载。');
+      return;
+    }
+    if (version.Source === 'version_manager') {
+      error('无法删除版本管理器托管的版本', '请在对应的外部版本管理器中处理此版本。');
+      return;
+    }
+    if (version.Source === 'devman' && !version.CanDelete && version.DeletePolicy !== 'direct') {
+      error('无法卸载此版本', version.DeletePolicy || '后端策略不允许删除。');
       return;
     }
 
@@ -198,8 +212,7 @@ export default function Versions() {
     setActionKey(`uninstall-${version.Id}`);
     try {
       const result = await UninstallVersion(version.Id, force);
-      setOperationResult(result);
-      success('卸载完成', result.Message);
+      showOperationResult(result, '卸载完成', '卸载失败');
       await loadData();
     } catch (e: unknown) {
       error('卸载失败', e instanceof Error ? e.message : String(e));
@@ -307,7 +320,7 @@ export default function Versions() {
               <div className="space-y-2">
                 {localVersions.map((version) => {
                   const switchDisabled = version.IsDefault || version.IsActive || hasManagerConflict || Boolean(actionKey);
-                  const uninstallDisabled = version.IsDefault || version.IsActive || Boolean(actionKey);
+                  const uninstallDisabled = !versionCanBeUninstalled(version) || Boolean(actionKey);
                   const isExternal = version.Source !== 'devman';
                   return (
                     <div
