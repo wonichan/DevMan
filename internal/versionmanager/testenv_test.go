@@ -127,7 +127,9 @@ type fakeVersionRegistry struct {
 	versions        []ManagedVersion
 	saved           []ManagedVersion
 	savedStrategies []InstallStrategy
+	deletedIDs      []int64
 	saveStrategyErr error
+	deleteErr       error
 }
 
 func newFakeVersionRegistry(versions []ManagedVersion) *fakeVersionRegistry {
@@ -167,6 +169,20 @@ func (f *fakeVersionRegistry) SaveInstallStrategy(strategy InstallStrategy) erro
 		return f.saveStrategyErr
 	}
 	f.savedStrategies = append(f.savedStrategies, strategy)
+	return nil
+}
+
+func (f *fakeVersionRegistry) DeleteToolVersion(id int64) error {
+	f.deletedIDs = append(f.deletedIDs, id)
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	for i := range f.versions {
+		if f.versions[i].ID == id {
+			f.versions = append(f.versions[:i], f.versions[i+1:]...)
+			return nil
+		}
+	}
 	return nil
 }
 

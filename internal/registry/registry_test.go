@@ -711,6 +711,55 @@ func TestVersionManagementTablesPersistRecords(t *testing.T) {
 	}
 }
 
+func TestDeleteToolVersionRemovesOnlyMatchingToolVersion(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	goVersion := &versionmanager.ManagedVersion{
+		ToolKey:      "go",
+		Version:      "1.26.0",
+		InstallPath:  `D:\production\go1.26.0`,
+		Source:       versionmanager.SourceDevMan,
+		CanDelete:    true,
+		DeletePolicy: versionmanager.DeletePolicyDirect,
+		DetectedAt:   time.Now(),
+	}
+	if err := reg.SaveToolVersion(goVersion); err != nil {
+		t.Fatalf("SaveToolVersion go failed: %v", err)
+	}
+	nodeVersion := &versionmanager.ManagedVersion{
+		ToolKey:      "node",
+		Version:      "24.0.0",
+		InstallPath:  `D:\production\node-v24.0.0`,
+		Source:       versionmanager.SourceDevMan,
+		CanDelete:    true,
+		DeletePolicy: versionmanager.DeletePolicyDirect,
+		DetectedAt:   time.Now(),
+	}
+	if err := reg.SaveToolVersion(nodeVersion); err != nil {
+		t.Fatalf("SaveToolVersion node failed: %v", err)
+	}
+
+	if err := reg.DeleteToolVersion(goVersion.ID); err != nil {
+		t.Fatalf("DeleteToolVersion failed: %v", err)
+	}
+
+	goVersions, err := reg.ListToolVersions("go")
+	if err != nil {
+		t.Fatalf("ListToolVersions go failed: %v", err)
+	}
+	if len(goVersions) != 0 {
+		t.Fatalf("expected go version to be deleted, got %#v", goVersions)
+	}
+	nodeVersions, err := reg.ListToolVersions("node")
+	if err != nil {
+		t.Fatalf("ListToolVersions node failed: %v", err)
+	}
+	if len(nodeVersions) != 1 || nodeVersions[0].ID != nodeVersion.ID {
+		t.Fatalf("expected node version to remain, got %#v", nodeVersions)
+	}
+}
+
 func TestSaveToolVersionUpsertReloadsExistingIDAndUpdatesFields(t *testing.T) {
 	reg, cleanup := setupTestDB(t)
 	defer cleanup()

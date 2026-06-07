@@ -667,6 +667,11 @@ func (r *Registry) ListToolVersions(toolKey string) ([]versionmanager.ManagedVer
 	return versions, rows.Err()
 }
 
+func (r *Registry) DeleteToolVersion(id int64) error {
+	_, err := r.db.Exec(`DELETE FROM tool_versions WHERE id = ?`, id)
+	return err
+}
+
 func (r *Registry) SaveInstallStrategy(strategy versionmanager.InstallStrategy) error {
 	if strategy.UpdatedAt.IsZero() {
 		strategy.UpdatedAt = time.Now()

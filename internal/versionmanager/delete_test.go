@@ -8,8 +8,9 @@ import (
 func TestUninstallAllowsDevManVersion(t *testing.T) {
 	env := newFakeEnvironment()
 	version := uninstallTestVersion(SourceDevMan, DeletePolicyDirect, true)
+	reg := newFakeVersionRegistry([]ManagedVersion{version})
 
-	result, err := NewService(nil, env).UninstallVersion(version, false)
+	result, err := NewService(reg, env).UninstallVersion(version, false)
 	if err != nil {
 		t.Fatalf("UninstallVersion failed: %v", err)
 	}
@@ -30,6 +31,68 @@ func TestUninstallAllowsDevManVersion(t *testing.T) {
 	}
 	if len(env.removedPaths) != 1 || env.removedPaths[0] != version.InstallPath {
 		t.Fatalf("removed paths = %#v", env.removedPaths)
+	}
+	if len(reg.deletedIDs) != 1 || reg.deletedIDs[0] != version.ID {
+		t.Fatalf("deleted IDs = %#v", reg.deletedIDs)
+	}
+}
+
+func TestUninstallReturnsErrorWhenRegistryDeleteFailsAfterRemoval(t *testing.T) {
+	env := newFakeEnvironment()
+	version := uninstallTestVersion(SourceDevMan, DeletePolicyDirect, true)
+	reg := newFakeVersionRegistry([]ManagedVersion{version})
+	reg.deleteErr = fmt.Errorf("delete row failed")
+
+	_, err := NewService(reg, env).UninstallVersion(version, false)
+	if err == nil {
+		t.Fatal("expected registry delete error")
+	}
+	if err.Error() != "delete row failed" {
+		t.Fatalf("error = %q", err)
+	}
+	if len(env.removedPaths) != 1 || env.removedPaths[0] != version.InstallPath {
+		t.Fatalf("removed paths = %#v", env.removedPaths)
+	}
+	if len(reg.deletedIDs) != 1 || reg.deletedIDs[0] != version.ID {
+		t.Fatalf("deleted IDs = %#v", reg.deletedIDs)
+	}
+}
+
+func TestUninstallBlocksDefaultAndActiveVersions(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*ManagedVersion)
+	}{
+		{
+			name: "default",
+			mutate: func(version *ManagedVersion) {
+				version.IsDefault = true
+			},
+		},
+		{
+			name: "active",
+			mutate: func(version *ManagedVersion) {
+				version.IsActive = true
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newFakeEnvironment()
+			version := uninstallTestVersion(SourceDevMan, DeletePolicyDirect, true)
+			tt.mutate(&version)
+
+			_, err := NewService(nil, env).UninstallVersion(version, false)
+			if err == nil {
+				t.Fatal("expected active/default guard error")
+			}
+			if err.Error() != "active/default versions must be switched before deletion" {
+				t.Fatalf("error = %q", err)
+			}
+			if len(env.removedPaths) != 0 {
+				t.Fatalf("removed paths = %#v", env.removedPaths)
+			}
+		})
 	}
 }
 
@@ -136,6 +199,8 @@ func TestUninstallRejectsUnsafeInstallPathBeforeRemoval(t *testing.T) {
 		{name: "relative", installPath: `go1.26`, wantError: "invalid install path: must be absolute"},
 		{name: "drive root", installPath: `D:\`, wantError: "invalid install path: must not be drive root"},
 		{name: "quote", installPath: `D:\production\go"1.26`, wantError: "invalid install path: contains quote"},
+		{name: "high-level parent", installPath: `D:\production`, wantError: `invalid delete path: D:\production does not look like a go install root`},
+		{name: "windows root", installPath: `C:\Windows`, wantError: `invalid delete path: C:\Windows is protected`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -157,12 +222,26 @@ func TestUninstallRejectsUnsafeInstallPathBeforeRemoval(t *testing.T) {
 	}
 }
 
+func TestUninstallAllowsToolVersionLookingDeletePath(t *testing.T) {
+	env := newFakeEnvironment()
+	version := uninstallTestVersion(SourceDevMan, DeletePolicyDirect, true)
+	version.InstallPath = `D:\production\go1.25.0`
+
+	_, err := NewService(nil, env).UninstallVersion(version, false)
+	if err != nil {
+		t.Fatalf("UninstallVersion failed: %v", err)
+	}
+	if len(env.removedPaths) != 1 || env.removedPaths[0] != version.InstallPath {
+		t.Fatalf("removed paths = %#v", env.removedPaths)
+	}
+}
+
 func uninstallTestVersion(source VersionSource, deletePolicy DeletePolicy, canDelete bool) ManagedVersion {
 	return ManagedVersion{
 		ID:           42,
 		ToolKey:      "go",
 		Version:      "1.26.0",
-		InstallPath:  `D:\production\go1.26`,
+		InstallPath:  `D:\production\go1.26.0`,
 		Source:       source,
 		CanDelete:    canDelete,
 		DeletePolicy: deletePolicy,
