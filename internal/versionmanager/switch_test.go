@@ -13,6 +13,7 @@ func TestSwitchVersionWritesShimsAndEnvironment(t *testing.T) {
 		Version:     "1.26.0",
 		InstallPath: `D:\production\go1.26`,
 	}
+	env.files[`D:\production\go1.26\bin\go.exe`] = true
 
 	result, err := NewService(nil, env).SwitchVersion(version)
 	if err != nil {
@@ -32,7 +33,11 @@ func TestSwitchVersionWritesShimsAndEnvironment(t *testing.T) {
 	}
 
 	shimPath := `D:\apps\DevMan\shims\go.cmd`
-	if string(env.writes[shimPath]) != GenerateShim(`D:\production\go1.26\bin\go.exe`) {
+	expectedShim, err := GenerateShim(`D:\production\go1.26\bin\go.exe`)
+	if err != nil {
+		t.Fatalf("GenerateShim failed: %v", err)
+	}
+	if string(env.writes[shimPath]) != expectedShim {
 		t.Fatalf("shim content = %q", string(env.writes[shimPath]))
 	}
 	if env.writePerms[shimPath] != 0755 {
@@ -44,10 +49,10 @@ func TestSwitchVersionWritesShimsAndEnvironment(t *testing.T) {
 	if len(env.runCommands) != 1 {
 		t.Fatalf("run commands = %#v", env.runCommands)
 	}
-	if env.runCommands[0].command != "go" || len(env.runCommands[0].args) != 1 || env.runCommands[0].args[0] != "version" {
+	if env.runCommands[0].command != `D:\production\go1.26\bin\go.exe` || len(env.runCommands[0].args) != 1 || env.runCommands[0].args[0] != "version" {
 		t.Fatalf("run command = %#v", env.runCommands[0])
 	}
-	if result.VerificationCommand != "go version" {
+	if result.VerificationCommand != `D:\production\go1.26\bin\go.exe version` {
 		t.Fatalf("VerificationCommand = %q", result.VerificationCommand)
 	}
 	if result.VerificationOutput != env.runOutput {
@@ -59,6 +64,65 @@ func TestSwitchVersionWritesShimsAndEnvironment(t *testing.T) {
 	if result.AffectedEnvironment["DEVMAN_HOME"] != env.exeDir {
 		t.Fatalf("AffectedEnvironment DEVMAN_HOME = %q", result.AffectedEnvironment["DEVMAN_HOME"])
 	}
+}
+
+func TestSwitchVersionVerificationFailureDoesNotMutate(t *testing.T) {
+	env := newFakeEnvironment()
+	env.exeDir = `D:\apps\DevMan`
+	env.files[`D:\production\go1.26\bin\go.exe`] = true
+	env.runErr = errFakeRunFailed()
+
+	_, err := NewService(nil, env).SwitchVersion(ManagedVersion{
+		ToolKey:     "go",
+		Version:     "1.26.0",
+		InstallPath: `D:\production\go1.26`,
+	})
+	if err == nil {
+		t.Fatal("expected verification error")
+	}
+	if len(env.runCommands) != 1 {
+		t.Fatalf("run commands = %#v", env.runCommands)
+	}
+	env.assertNoMutation(t)
+	if env.vars["GOROOT"] != "" || env.vars["DEVMAN_HOME"] != "" {
+		t.Fatalf("user env changed before verification completed: %#v", env.vars)
+	}
+}
+
+func TestSwitchVersionRejectsBadInstallPathBeforeMutation(t *testing.T) {
+	env := newFakeEnvironment()
+	env.exeDir = `D:\apps\DevMan`
+
+	_, err := NewService(nil, env).SwitchVersion(ManagedVersion{
+		ToolKey:     "go",
+		Version:     "1.26.0",
+		InstallPath: `go1.26`,
+	})
+	if err == nil {
+		t.Fatal("expected install path error")
+	}
+	if err.Error() != "invalid install path: must be absolute" {
+		t.Fatalf("error = %q", err)
+	}
+	env.assertNoMutation(t)
+}
+
+func TestSwitchVersionRejectsMissingExecutableBeforeMutation(t *testing.T) {
+	env := newFakeEnvironment()
+	env.exeDir = `D:\apps\DevMan`
+
+	_, err := NewService(nil, env).SwitchVersion(ManagedVersion{
+		ToolKey:     "go",
+		Version:     "1.26.0",
+		InstallPath: `D:\production\go1.26`,
+	})
+	if err == nil {
+		t.Fatal("expected missing executable error")
+	}
+	if err.Error() != `expected executable not found: D:\production\go1.26\bin\go.exe` {
+		t.Fatalf("error = %q", err)
+	}
+	env.assertNoMutation(t)
 }
 
 func TestSwitchVersionRejectsUnsupportedToolBeforeConflictDetection(t *testing.T) {
@@ -104,3 +168,4 @@ type readOnlyEnvironment struct{}
 func (readOnlyEnvironment) Getenv(string) string   { return "" }
 func (readOnlyEnvironment) LookPath(string) string { return "" }
 func (readOnlyEnvironment) DirExists(string) bool  { return false }
+func (readOnlyEnvironment) FileExists(string) bool { return false }

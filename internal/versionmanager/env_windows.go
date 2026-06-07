@@ -4,11 +4,25 @@ package versionmanager
 
 import (
 	"strings"
+	"syscall"
+	"unsafe"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
 const userEnvironmentPath = `Environment`
+
+const (
+	hwndBroadcast   = 0xffff
+	wmSettingChange = 0x001A
+	smtoAbortIfHung = 0x0002
+)
+
+var (
+	user32                 = windows.NewLazySystemDLL("user32.dll")
+	procSendMessageTimeout = user32.NewProc("SendMessageTimeoutW")
+)
 
 func setUserEnv(key string, value string) error {
 	envKey, err := registry.OpenKey(registry.CURRENT_USER, userEnvironmentPath, registry.SET_VALUE)
@@ -40,9 +54,17 @@ func ensureUserPathEntry(entry string) error {
 	}
 
 	if strings.TrimSpace(current) == "" {
-		return envKey.SetStringValue("Path", entry)
+		if err := envKey.SetExpandStringValue("Path", entry); err != nil {
+			return err
+		}
+		broadcastEnvironmentChange()
+		return nil
 	}
-	return envKey.SetStringValue("Path", entry+";"+current)
+	if err := envKey.SetExpandStringValue("Path", entry+";"+current); err != nil {
+		return err
+	}
+	broadcastEnvironmentChange()
+	return nil
 }
 
 func splitPathEntries(value string) []string {
@@ -50,4 +72,21 @@ func splitPathEntries(value string) []string {
 		return nil
 	}
 	return strings.Split(value, ";")
+}
+
+func broadcastEnvironmentChange() {
+	environment, err := syscall.UTF16PtrFromString("Environment")
+	if err != nil {
+		return
+	}
+	// Best effort: notify Explorer and future shells without making registry writes depend on UI messaging.
+	_, _, _ = procSendMessageTimeout.Call(
+		uintptr(hwndBroadcast),
+		uintptr(wmSettingChange),
+		0,
+		uintptr(unsafe.Pointer(environment)),
+		uintptr(smtoAbortIfHung),
+		uintptr(5000),
+		0,
+	)
 }

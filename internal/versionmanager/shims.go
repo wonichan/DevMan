@@ -3,10 +3,14 @@ package versionmanager
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
-func GenerateShim(target string) string {
-	return fmt.Sprintf("@echo off\r\n\"%s\" %%*\r\n", target)
+func GenerateShim(target string) (string, error) {
+	if strings.Contains(target, `"`) {
+		return "", fmt.Errorf("shim target contains quote: %s", target)
+	}
+	return fmt.Sprintf("@echo off\r\n\"%s\" %%*\r\n", target), nil
 }
 
 func ShimTargets(toolKey, installPath string) (map[string]string, error) {
@@ -32,7 +36,7 @@ func ShimTargets(toolKey, installPath string) (map[string]string, error) {
 	case "flutter":
 		return map[string]string{
 			"flutter.cmd": filepath.Join(installPath, "bin", "flutter.bat"),
-			"dart.cmd":    filepath.Join(installPath, "bin", "dart.exe"),
+			"dart.cmd":    filepath.Join(installPath, "bin", "dart.bat"),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported tool: %s", toolKey)

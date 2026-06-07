@@ -79,19 +79,44 @@ func (s *Service) SwitchVersion(version ManagedVersion) (*VersionOperationResult
 	if strings.TrimSpace(exeDir) == "" {
 		return nil, fmt.Errorf("executable directory is required")
 	}
+
+	if err := validateInstallPath(version.InstallPath); err != nil {
+		return nil, err
+	}
+	targets, err := ShimTargets(tool.Key, version.InstallPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateShimTargets(targets); err != nil {
+		return nil, err
+	}
+	primaryTarget, ok := primaryShimTarget(tool, targets)
+	if !ok {
+		return nil, fmt.Errorf("primary shim target not found for %s", tool.Key)
+	}
+	if !mutable.FileExists(primaryTarget) {
+		return nil, fmt.Errorf("expected executable not found: %s", primaryTarget)
+	}
+
+	verificationOutput, err := mutable.Run(primaryTarget, tool.VersionArgs...)
+	if err != nil {
+		return nil, err
+	}
+	verificationCommand := strings.TrimSpace(strings.Join(append([]string{primaryTarget}, tool.VersionArgs...), " "))
+
 	shimDir := filepath.Join(exeDir, "shims")
 	if err := mutable.MkdirAll(shimDir, 0755); err != nil {
 		return nil, err
 	}
 
-	targets, err := ShimTargets(tool.Key, version.InstallPath)
-	if err != nil {
-		return nil, err
-	}
 	affectedPaths := []string{shimDir}
 	for shimName, target := range targets {
 		shimPath := filepath.Join(shimDir, shimName)
-		if err := mutable.WriteFile(shimPath, []byte(GenerateShim(target)), 0755); err != nil {
+		shim, err := GenerateShim(target)
+		if err != nil {
+			return nil, err
+		}
+		if err := mutable.WriteFile(shimPath, []byte(shim), 0755); err != nil {
 			return nil, err
 		}
 		affectedPaths = append(affectedPaths, shimPath)
@@ -108,13 +133,6 @@ func (s *Service) SwitchVersion(version ManagedVersion) (*VersionOperationResult
 		return nil, err
 	}
 
-	command := strings.TrimSuffix(tool.PrimaryExe, filepath.Ext(tool.PrimaryExe))
-	verificationOutput, err := mutable.Run(command, tool.VersionArgs...)
-	if err != nil {
-		return nil, err
-	}
-	verificationCommand := strings.TrimSpace(strings.Join(append([]string{command}, tool.VersionArgs...), " "))
-
 	return &VersionOperationResult{
 		Success:       true,
 		Message:       fmt.Sprintf("switched %s to %s", tool.Key, version.Version),
@@ -130,6 +148,43 @@ func (s *Service) SwitchVersion(version ManagedVersion) (*VersionOperationResult
 		VerificationCommand: verificationCommand,
 		VerificationOutput:  verificationOutput,
 	}, nil
+}
+
+func validateInstallPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("invalid install path: required")
+	}
+	if strings.Contains(path, `"`) {
+		return fmt.Errorf("invalid install path: contains quote")
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("invalid install path: must be absolute")
+	}
+	clean := filepath.Clean(path)
+	volume := filepath.VolumeName(clean)
+	if volume != "" && strings.EqualFold(clean, volume+string(filepath.Separator)) {
+		return fmt.Errorf("invalid install path: must not be drive root")
+	}
+	if filepath.Dir(clean) == clean {
+		return fmt.Errorf("invalid install path: must not be filesystem root")
+	}
+	return nil
+}
+
+func validateShimTargets(targets map[string]string) error {
+	for _, target := range targets {
+		if strings.Contains(target, `"`) {
+			return fmt.Errorf("shim target contains quote: %s", target)
+		}
+	}
+	return nil
+}
+
+func primaryShimTarget(tool ToolDefinition, targets map[string]string) (string, bool) {
+	primaryShim := strings.TrimSuffix(tool.PrimaryExe, filepath.Ext(tool.PrimaryExe)) + ".cmd"
+	target, ok := targets[primaryShim]
+	return target, ok
 }
 
 func (s *Service) DetectVersionManager(toolKey string) *VersionManagerConflict {
