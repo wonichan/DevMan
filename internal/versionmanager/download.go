@@ -218,22 +218,95 @@ func extractZip(archivePath string, targetDir string) error {
 
 func validateZipEntries(targetDir string, entries []*zip.File) (map[string]string, error) {
 	targets := make(map[string]string, len(entries))
+	normalized := make(map[string]string, len(entries))
 	for _, entry := range entries {
 		rel, err := zipEntryRel(entry.Name)
 		if err != nil {
 			return nil, err
 		}
-		targetPath := filepath.Join(targetDir, rel)
-		relToTarget, err := filepath.Rel(targetDir, targetPath)
-		if err != nil {
-			return nil, err
+		normalized[entry.Name] = rel
+	}
+
+	rootToStrip := sharedArchiveRoot(entries, normalized)
+	for _, entry := range entries {
+		rel := normalized[entry.Name]
+		if rootToStrip != "" {
+			stripped, ok := stripArchiveRoot(rel, rootToStrip)
+			if ok {
+				rel = stripped
+			}
 		}
-		if relToTarget == ".." || strings.HasPrefix(relToTarget, ".."+string(filepath.Separator)) || filepath.IsAbs(relToTarget) {
-			return nil, fmt.Errorf("invalid archive entry: %s", entry.Name)
+		if rel == "" {
+			targets[entry.Name] = rel
+			continue
+		}
+		if err := validateZipTarget(targetDir, rel, entry.Name); err != nil {
+			return nil, err
 		}
 		targets[entry.Name] = rel
 	}
 	return targets, nil
+}
+
+func sharedArchiveRoot(entries []*zip.File, normalized map[string]string) string {
+	root := ""
+	sawFile := false
+	for _, entry := range entries {
+		rel := normalized[entry.Name]
+		first := firstPathComponent(rel)
+		if first == "" {
+			return ""
+		}
+		if root == "" {
+			root = first
+		} else if root != first {
+			return ""
+		}
+		if !entry.FileInfo().IsDir() {
+			if first == rel {
+				return ""
+			}
+			sawFile = true
+		}
+	}
+	if !sawFile {
+		return ""
+	}
+	return root
+}
+
+func stripArchiveRoot(rel string, root string) (string, bool) {
+	if rel == root {
+		return "", true
+	}
+	prefix := root + string(filepath.Separator)
+	if strings.HasPrefix(rel, prefix) {
+		return strings.TrimPrefix(rel, prefix), true
+	}
+	return rel, false
+}
+
+func firstPathComponent(rel string) string {
+	rel = filepath.Clean(rel)
+	if rel == "." || rel == string(filepath.Separator) {
+		return ""
+	}
+	if i := strings.Index(rel, string(filepath.Separator)); i >= 0 {
+		return rel[:i]
+	}
+	return rel
+}
+
+func validateZipTarget(targetDir string, rel string, entryName string) error {
+	targetPath := filepath.Join(targetDir, rel)
+	relToTarget, err := filepath.Rel(targetDir, targetPath)
+	if err != nil {
+		return err
+	}
+	if relToTarget == ".." || strings.HasPrefix(relToTarget, ".."+string(filepath.Separator)) || filepath.IsAbs(relToTarget) {
+		return fmt.Errorf("invalid archive entry: %s", entryName)
+	}
+	return nil
 }
 
 func zipEntryTarget(targetDir string, entryName string) (string, error) {

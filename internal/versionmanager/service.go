@@ -56,13 +56,21 @@ func (s *Service) ListToolVersions() ([]ToolVersionState, error) {
 }
 
 func (s *Service) PreviewVersionInstall(toolKey string, version string) (*VersionInstallPlan, error) {
-	if _, ok := ToolByKey(toolKey); !ok {
+	tool, ok := ToolByKey(toolKey)
+	if !ok {
 		return nil, fmt.Errorf("unsupported tool: %s", toolKey)
 	}
 	if conflict := s.DetectVersionManager(toolKey); conflict != nil && conflict.Detected {
 		return nil, fmt.Errorf("%s is managed by %s; DevMan will not take over this tool", toolKey, conflict.Manager)
 	}
-	return ResolveInstallRoot(s.env, toolKey, version)
+	plan, err := ResolveInstallRoot(s.env, toolKey, version)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.populateOfficialDownloadMetadata(plan, tool, version); err != nil {
+		return nil, err
+	}
+	return plan, nil
 }
 
 func (s *Service) FetchOfficialVersions(toolKey string) (*ToolVersionCatalog, error) {
@@ -71,6 +79,55 @@ func (s *Service) FetchOfficialVersions(toolKey string) (*ToolVersionCatalog, er
 		provider = HTTPVersionProvider{}
 	}
 	return provider.Fetch(toolKey)
+}
+
+func (s *Service) populateOfficialDownloadMetadata(plan *VersionInstallPlan, tool ToolDefinition, requestedVersion string) error {
+	provider := s.versionProvider
+	if provider == nil {
+		provider = HTTPVersionProvider{}
+	}
+	catalog, err := provider.Fetch(tool.Key)
+	if err != nil {
+		return err
+	}
+	selected, ok := findOfficialVersion(catalog.Versions, tool, requestedVersion)
+	if !ok {
+		return fmt.Errorf("official %s version not found: %s", tool.Key, requestedVersion)
+	}
+	if strings.TrimSpace(selected.DownloadURL) == "" {
+		return fmt.Errorf("official %s version has no download URL: %s", tool.Key, requestedVersion)
+	}
+	plan.DownloadURL = selected.DownloadURL
+	if strings.TrimSpace(plan.ArchiveName) == "" {
+		archiveName, err := archiveFileName(*plan)
+		if err != nil {
+			return err
+		}
+		plan.ArchiveName = archiveName
+	}
+	return nil
+}
+
+func findOfficialVersion(versions []AvailableVersion, tool ToolDefinition, requestedVersion string) (AvailableVersion, bool) {
+	want := comparableVersion(tool, requestedVersion)
+	for _, version := range versions {
+		if comparableVersion(tool, version.Version) == want {
+			return version, true
+		}
+	}
+	return AvailableVersion{}, false
+}
+
+func comparableVersion(tool ToolDefinition, version string) string {
+	version = strings.TrimSpace(strings.ToLower(version))
+	if strings.HasPrefix(version, "bun-v") {
+		version = strings.TrimPrefix(version, "bun-v")
+	}
+	if tool.Key == "go" && strings.HasPrefix(version, "go") {
+		version = strings.TrimPrefix(version, "go")
+	}
+	version = strings.TrimPrefix(version, "v")
+	return version
 }
 
 func (s *Service) InstallVersion(toolKey string, version string, targetDir string) (*VersionOperationResult, error) {

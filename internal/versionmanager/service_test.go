@@ -24,12 +24,82 @@ func TestPreviewInstallReturnsResolvedInstallPlan(t *testing.T) {
 	env.vars["GOROOT"] = `D:\production\go1.26`
 	env.dirs[`D:\production\go1.26`] = true
 
-	plan, err := NewService(nil, env).PreviewVersionInstall("go", "1.25.0")
+	service := NewService(nil, env)
+	service.versionProvider = fakeOfficialCatalog("go", "1.25.0", "https://go.dev/dl/go1.25.0.windows-amd64.zip")
+
+	plan, err := service.PreviewVersionInstall("go", "1.25.0")
 	if err != nil {
 		t.Fatalf("PreviewVersionInstall failed: %v", err)
 	}
 	if plan.TargetDir != `D:\production\go1.25.0` {
 		t.Fatalf("TargetDir = %q", plan.TargetDir)
+	}
+}
+
+func TestPreviewInstallPopulatesOfficialDownloadMetadata(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["GOROOT"] = `D:\production\go1.26`
+	env.dirs[`D:\production\go1.26`] = true
+	service := NewService(nil, env)
+	service.versionProvider = fakeOfficialVersionProvider{
+		catalog: &ToolVersionCatalog{
+			ToolKey: "go",
+			Versions: []AvailableVersion{{
+				Version:     "1.25.0",
+				DownloadURL: "https://go.dev/dl/go1.25.0.windows-amd64.zip",
+			}},
+		},
+	}
+
+	plan, err := service.PreviewVersionInstall("go", "go1.25.0")
+	if err != nil {
+		t.Fatalf("PreviewVersionInstall failed: %v", err)
+	}
+	if plan.Version != "1.25.0" {
+		t.Fatalf("Version = %q, want canonical version", plan.Version)
+	}
+	if plan.DownloadURL != "https://go.dev/dl/go1.25.0.windows-amd64.zip" {
+		t.Fatalf("DownloadURL = %q", plan.DownloadURL)
+	}
+	if plan.ArchiveName != "go1.25.0.windows-amd64.zip" {
+		t.Fatalf("ArchiveName = %q", plan.ArchiveName)
+	}
+}
+
+func TestInstallVersionUsesOfficialDownloadMetadata(t *testing.T) {
+	env := newFakeEnvironment()
+	env.vars["NODE_HOME"] = `D:\production\node-v22.10.0`
+	env.dirs[`D:\production\node-v22.10.0`] = true
+	reg := newFakeVersionRegistry(nil)
+	downloader := &fakeDownloader{}
+	service := NewService(reg, env)
+	service.downloader = downloader
+	service.versionProvider = fakeOfficialVersionProvider{
+		catalog: &ToolVersionCatalog{
+			ToolKey: "node",
+			Versions: []AvailableVersion{{
+				Version:     "22.11.0",
+				DownloadURL: "https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip",
+			}},
+		},
+	}
+
+	_, err := service.InstallVersion("node", "v22.11.0", `D:\production\node-v22.11.0`)
+	if err != nil {
+		t.Fatalf("InstallVersion returned error: %v", err)
+	}
+	if len(downloader.plans) != 1 {
+		t.Fatalf("downloader plans = %d, want 1", len(downloader.plans))
+	}
+	plan := downloader.plans[0]
+	if plan.Version != "v22.11.0" {
+		t.Fatalf("Version = %q, want requested canonical node version", plan.Version)
+	}
+	if plan.DownloadURL != "https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip" {
+		t.Fatalf("DownloadURL = %q", plan.DownloadURL)
+	}
+	if plan.ArchiveName != "node-v22.11.0-win-x64.zip" {
+		t.Fatalf("ArchiveName = %q", plan.ArchiveName)
 	}
 }
 
@@ -90,6 +160,20 @@ func TestFetchOfficialVersionsUsesInjectedProvider(t *testing.T) {
 type fakeOfficialVersionProvider struct {
 	catalog *ToolVersionCatalog
 	err     error
+}
+
+func fakeOfficialCatalog(toolKey string, version string, downloadURL string) fakeOfficialVersionProvider {
+	return fakeOfficialVersionProvider{
+		catalog: &ToolVersionCatalog{
+			ToolKey: toolKey,
+			Versions: []AvailableVersion{{
+				Version:     version,
+				DownloadURL: downloadURL,
+			}},
+			FetchedAt: time.Now(),
+			SourceURL: "fake://" + toolKey,
+		},
+	}
 }
 
 func (p fakeOfficialVersionProvider) Fetch(toolKey string) (*ToolVersionCatalog, error) {

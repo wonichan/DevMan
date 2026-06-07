@@ -30,6 +30,7 @@ func TestInstallVersionPersistsDevManSource(t *testing.T) {
 	downloader := &fakeDownloader{}
 	service := NewService(reg, env)
 	service.downloader = downloader
+	service.versionProvider = fakeOfficialCatalog("go", "1.25.0", "https://go.dev/dl/go1.25.0.windows-amd64.zip")
 
 	result, err := service.InstallVersion("go", "1.25.0", `D:\production\go1.25.0`)
 	if err != nil {
@@ -81,6 +82,7 @@ func TestInstallVersionDownloaderFailureDoesNotSaveVersion(t *testing.T) {
 	reg := newFakeVersionRegistry(nil)
 	service := NewService(reg, env)
 	service.downloader = &fakeDownloader{err: errors.New("download failed")}
+	service.versionProvider = fakeOfficialCatalog("go", "1.25.0", "https://go.dev/dl/go1.25.0.windows-amd64.zip")
 
 	_, err := service.InstallVersion("go", "1.25.0", `D:\production\go1.25.0`)
 	if err == nil {
@@ -109,6 +111,7 @@ func TestInstallVersionUnsafeOverrideTargetDoesNotDownloadOrSave(t *testing.T) {
 			downloader := &fakeDownloader{}
 			service := NewService(reg, env)
 			service.downloader = downloader
+			service.versionProvider = fakeOfficialCatalog("go", "1.25.0", "https://go.dev/dl/go1.25.0.windows-amd64.zip")
 
 			_, err := service.InstallVersion("go", "1.25.0", tt.targetDir)
 			if err == nil {
@@ -132,6 +135,7 @@ func TestInstallVersionStrategyFailureDoesNotSaveVersion(t *testing.T) {
 	reg.saveStrategyErr = errors.New("strategy failed")
 	service := NewService(reg, env)
 	service.downloader = &fakeDownloader{}
+	service.versionProvider = fakeOfficialCatalog("go", "1.25.0", "https://go.dev/dl/go1.25.0.windows-amd64.zip")
 
 	_, err := service.InstallVersion("go", "1.25.0", `D:\production\go1.25.0`)
 	if err == nil {
@@ -340,8 +344,27 @@ func TestHTTPDownloaderDownloadsAndExtractsZip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadAndExtract returned error: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(targetDir, "go", "bin", "go.exe")); err != nil {
+	if _, err := os.Stat(filepath.Join(targetDir, "bin", "go.exe")); err != nil {
 		t.Fatalf("extracted file stat error: %v", err)
+	}
+}
+
+func TestExtractZipStripsSingleArchiveRoot(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "go.zip")
+	createZip(t, archivePath, map[string]string{
+		"go1.25.0.windows-amd64/bin/go.exe": "binary",
+		"go1.25.0.windows-amd64/VERSION":    "1.25.0",
+	})
+	targetDir := filepath.Join(t.TempDir(), "go1.25.0")
+
+	if err := extractZip(archivePath, targetDir); err != nil {
+		t.Fatalf("extractZip returned error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "bin", "go.exe")); err != nil {
+		t.Fatalf("stripped executable stat error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "go1.25.0.windows-amd64", "bin", "go.exe")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("archive root stat error = %v, want not exist", err)
 	}
 }
 

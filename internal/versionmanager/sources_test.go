@@ -94,6 +94,111 @@ func TestParseGoVersionsRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestParseBunVersionsReturnsWindowsX64Assets(t *testing.T) {
+	data := []byte(`[
+		{
+			"tag_name": "bun-v1.2.0",
+			"published_at": "2025-01-15T12:30:00Z",
+			"assets": [
+				{"name": "bun-linux-x64.zip", "browser_download_url": "https://example.com/bun-linux-x64.zip"},
+				{"name": "bun-windows-x64.zip", "browser_download_url": "https://example.com/bun-windows-x64.zip"}
+			]
+		},
+		{
+			"tag_name": "v1.1.0",
+			"published_at": "2024-12-01T00:00:00Z",
+			"assets": [
+				{"name": "bun-windows-aarch64.zip", "browser_download_url": "https://example.com/bun-windows-aarch64.zip"}
+			]
+		}
+	]`)
+
+	versions, err := ParseBunVersions(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(versions) != 1 {
+		t.Fatalf("expected 1 version, got %d", len(versions))
+	}
+	version := versions[0]
+	if version.Version != "1.2.0" {
+		t.Fatalf("Version = %q", version.Version)
+	}
+	if !version.Stable {
+		t.Fatal("expected Stable")
+	}
+	if version.Arch != "windows-amd64" {
+		t.Fatalf("Arch = %q", version.Arch)
+	}
+	if version.DownloadURL != "https://example.com/bun-windows-x64.zip" {
+		t.Fatalf("DownloadURL = %q", version.DownloadURL)
+	}
+	if version.ReleaseDate.IsZero() {
+		t.Fatal("expected ReleaseDate")
+	}
+}
+
+func TestParseFlutterVersionsReturnsStableWindowsX64Archives(t *testing.T) {
+	data := []byte(`{
+		"base_url": "https://storage.googleapis.com/flutter_infra_release/releases",
+		"releases": [
+			{
+				"version": "3.27.1",
+				"channel": "stable",
+				"archive": "stable/windows/flutter_windows_3.27.1-stable.zip",
+				"dart_sdk_arch": "x64",
+				"hash": "abc123",
+				"release_date": "2024-12-18T17:03:00.000Z"
+			},
+			{
+				"version": "3.28.0-0.1.pre",
+				"channel": "beta",
+				"archive": "beta/windows/flutter_windows_3.28.0-0.1.pre-beta.zip",
+				"dart_sdk_arch": "x64",
+				"hash": "def456",
+				"release_date": "2025-01-02T00:00:00.000Z"
+			},
+			{
+				"version": "3.27.1",
+				"channel": "stable",
+				"archive": "stable/windows/flutter_windows_3.27.1-stable-arm64.zip",
+				"dart_sdk_arch": "arm64",
+				"hash": "ghi789",
+				"release_date": "2024-12-18T17:03:00.000Z"
+			}
+		]
+	}`)
+
+	versions, err := ParseFlutterVersions(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(versions) != 1 {
+		t.Fatalf("expected 1 version, got %d", len(versions))
+	}
+	version := versions[0]
+	if version.Version != "3.27.1" {
+		t.Fatalf("Version = %q", version.Version)
+	}
+	if !version.Stable {
+		t.Fatal("expected Stable")
+	}
+	if version.Arch != "windows-amd64" {
+		t.Fatalf("Arch = %q", version.Arch)
+	}
+	if version.DownloadURL != "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.27.1-stable.zip" {
+		t.Fatalf("DownloadURL = %q", version.DownloadURL)
+	}
+	if version.Checksum != "abc123" {
+		t.Fatalf("Checksum = %q", version.Checksum)
+	}
+	if version.ReleaseDate.IsZero() {
+		t.Fatal("expected ReleaseDate")
+	}
+}
+
 func TestHTTPVersionProviderFetchGoUsesOfficialURL(t *testing.T) {
 	data, err := os.ReadFile("testdata/go.json")
 	if err != nil {
@@ -184,38 +289,65 @@ func TestHTTPVersionProviderFetchMalformedJSONPropagatesError(t *testing.T) {
 	}
 }
 
-func TestHTTPVersionProviderFetchBunAndFlutterShortCircuitWithoutHTTP(t *testing.T) {
-	for _, toolKey := range []string{"bun", "flutter"} {
-		t.Run(toolKey, func(t *testing.T) {
-			transport := fakeRoundTripper{
-				err: fmt.Errorf("unexpected HTTP call"),
-			}
+func TestHTTPVersionProviderFetchBunUsesOfficialURL(t *testing.T) {
+	transport := fakeRoundTripper{
+		responses: map[string]fakeHTTPResponse{
+			officialSourceURL("bun"): {
+				statusCode: http.StatusOK,
+				status:     "200 OK",
+				body:       `[{"tag_name":"v1.2.0","assets":[{"name":"bun-windows-x64.zip","browser_download_url":"https://example.com/bun.zip"}]}]`,
+			},
+		},
+	}
 
-			catalog, err := (HTTPVersionProvider{
-				Client: &http.Client{Transport: &transport},
-			}).Fetch(toolKey)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if catalog.ToolKey != toolKey {
-				t.Fatalf("ToolKey = %q", catalog.ToolKey)
-			}
-			if catalog.SourceURL != officialSourceURL(toolKey) {
-				t.Fatalf("SourceURL = %q", catalog.SourceURL)
-			}
-			if catalog.FetchedAt.IsZero() {
-				t.Fatal("expected FetchedAt")
-			}
-			if catalog.Versions == nil {
-				t.Fatal("expected non-nil Versions")
-			}
-			if len(catalog.Versions) != 0 {
-				t.Fatalf("expected no versions, got %d", len(catalog.Versions))
-			}
-			if transport.calls != 0 {
-				t.Fatalf("expected no HTTP calls, got %d", transport.calls)
-			}
-		})
+	catalog, err := (HTTPVersionProvider{
+		Client: &http.Client{Transport: &transport},
+	}).Fetch("bun")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalog.ToolKey != "bun" {
+		t.Fatalf("ToolKey = %q", catalog.ToolKey)
+	}
+	if catalog.SourceURL != officialSourceURL("bun") {
+		t.Fatalf("SourceURL = %q", catalog.SourceURL)
+	}
+	if len(catalog.Versions) != 1 {
+		t.Fatalf("expected 1 version, got %d", len(catalog.Versions))
+	}
+	if transport.calls != 1 {
+		t.Fatalf("expected 1 HTTP call, got %d", transport.calls)
+	}
+}
+
+func TestHTTPVersionProviderFetchFlutterUsesOfficialURL(t *testing.T) {
+	transport := fakeRoundTripper{
+		responses: map[string]fakeHTTPResponse{
+			officialSourceURL("flutter"): {
+				statusCode: http.StatusOK,
+				status:     "200 OK",
+				body:       `{"base_url":"https://storage.googleapis.com/flutter_infra_release/releases","releases":[{"version":"3.27.1","channel":"stable","archive":"stable/windows/flutter_windows_3.27.1-stable.zip","dart_sdk_arch":"x64","release_date":"2024-12-18T17:03:00.000Z"}]}`,
+			},
+		},
+	}
+
+	catalog, err := (HTTPVersionProvider{
+		Client: &http.Client{Transport: &transport},
+	}).Fetch("flutter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalog.ToolKey != "flutter" {
+		t.Fatalf("ToolKey = %q", catalog.ToolKey)
+	}
+	if catalog.SourceURL != officialSourceURL("flutter") {
+		t.Fatalf("SourceURL = %q", catalog.SourceURL)
+	}
+	if len(catalog.Versions) != 1 {
+		t.Fatalf("expected 1 version, got %d", len(catalog.Versions))
+	}
+	if transport.calls != 1 {
+		t.Fatalf("expected 1 HTTP call, got %d", transport.calls)
 	}
 }
 
