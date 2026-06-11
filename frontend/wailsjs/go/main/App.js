@@ -10,6 +10,14 @@ export function CleanItems(arg1) {
   return window['go']['main']['App']['CleanItems'](arg1);
 }
 
+export function DetectVersionManager(arg1) {
+  return window['go']['main']['App']['DetectVersionManager'](arg1);
+}
+
+export function FetchOfficialVersions(arg1) {
+  return window['go']['main']['App']['FetchOfficialVersions'](arg1);
+}
+
 export function GetDiskInfo() {
   return window['go']['main']['App']['GetDiskInfo']();
 }
@@ -34,6 +42,14 @@ export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }
 
+export function InstallVersion(arg1, arg2, arg3) {
+  return window['go']['main']['App']['InstallVersion'](arg1, arg2, arg3);
+}
+
+export function ListToolVersions() {
+  return window['go']['main']['App']['ListToolVersions']();
+}
+
 export function ManageEnv(arg1) {
   return window['go']['main']['App']['ManageEnv'](arg1);
 }
@@ -42,12 +58,24 @@ export function Migrate(arg1, arg2, arg3) {
   return window['go']['main']['App']['Migrate'](arg1, arg2, arg3);
 }
 
+export function PreviewVersionInstall(arg1, arg2) {
+  return window['go']['main']['App']['PreviewVersionInstall'](arg1, arg2);
+}
+
 export function SaveSettings(arg1) {
   return window['go']['main']['App']['SaveSettings'](arg1);
 }
 
 export function ScanAll() {
   return window['go']['main']['App']['ScanAll']();
+}
+
+export function SwitchVersion(arg1, arg2) {
+  return window['go']['main']['App']['SwitchVersion'](arg1, arg2);
+}
+
+export function UninstallVersion(arg1, arg2) {
+  return window['go']['main']['App']['UninstallVersion'](arg1, arg2);
 }
 
 export function UnmanageEnv(arg1) {

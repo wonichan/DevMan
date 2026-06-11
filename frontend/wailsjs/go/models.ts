@@ -350,3 +350,257 @@ export namespace models {
 
 }
 
+export namespace versionmanager {
+	
+	export class AvailableVersion {
+	    Version: string;
+	    Stable: boolean;
+	    // Go type: time
+	    ReleaseDate: any;
+	    Arch: string;
+	    DownloadUrl: string;
+	    Checksum: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AvailableVersion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Version = source["Version"];
+	        this.Stable = source["Stable"];
+	        this.ReleaseDate = this.convertValues(source["ReleaseDate"], null);
+	        this.Arch = source["Arch"];
+	        this.DownloadUrl = source["DownloadUrl"];
+	        this.Checksum = source["Checksum"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ManagedVersion {
+	    Id: number;
+	    ToolKey: string;
+	    Version: string;
+	    InstallPath: string;
+	    BinPath: string;
+	    Source: string;
+	    IsDefault: boolean;
+	    IsActive: boolean;
+	    CanDelete: boolean;
+	    DeletePolicy: string;
+	    // Go type: time
+	    DetectedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new ManagedVersion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Id = source["Id"];
+	        this.ToolKey = source["ToolKey"];
+	        this.Version = source["Version"];
+	        this.InstallPath = source["InstallPath"];
+	        this.BinPath = source["BinPath"];
+	        this.Source = source["Source"];
+	        this.IsDefault = source["IsDefault"];
+	        this.IsActive = source["IsActive"];
+	        this.CanDelete = source["CanDelete"];
+	        this.DeletePolicy = source["DeletePolicy"];
+	        this.DetectedAt = this.convertValues(source["DetectedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ToolVersionCatalog {
+	    ToolKey: string;
+	    Versions: AvailableVersion[];
+	    // Go type: time
+	    FetchedAt: any;
+	    SourceUrl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolVersionCatalog(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ToolKey = source["ToolKey"];
+	        this.Versions = this.convertValues(source["Versions"], AvailableVersion);
+	        this.FetchedAt = this.convertValues(source["FetchedAt"], null);
+	        this.SourceUrl = source["SourceUrl"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class VersionInstallPlan {
+	    ToolKey: string;
+	    Version: string;
+	    TargetDir: string;
+	    DownloadUrl: string;
+	    ArchiveName: string;
+	    ExtractedDir: string;
+	    WillOverwrite: boolean;
+	    ResolverReason: string;
+	    EnvironmentChanges: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new VersionInstallPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ToolKey = source["ToolKey"];
+	        this.Version = source["Version"];
+	        this.TargetDir = source["TargetDir"];
+	        this.DownloadUrl = source["DownloadUrl"];
+	        this.ArchiveName = source["ArchiveName"];
+	        this.ExtractedDir = source["ExtractedDir"];
+	        this.WillOverwrite = source["WillOverwrite"];
+	        this.ResolverReason = source["ResolverReason"];
+	        this.EnvironmentChanges = source["EnvironmentChanges"];
+	    }
+	}
+	export class VersionManagerConflict {
+	    ToolKey: string;
+	    Manager: string;
+	    Evidence: string;
+	    Detected: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new VersionManagerConflict(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ToolKey = source["ToolKey"];
+	        this.Manager = source["Manager"];
+	        this.Evidence = source["Evidence"];
+	        this.Detected = source["Detected"];
+	    }
+	}
+	export class ToolVersionState {
+	    ToolKey: string;
+	    Name: string;
+	    LocalVersions: ManagedVersion[];
+	    CurrentDefault?: ManagedVersion;
+	    ActiveCommand: string;
+	    PathConflict: string;
+	    ManagerConflict?: VersionManagerConflict;
+	    LastInstallPlan?: VersionInstallPlan;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolVersionState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ToolKey = source["ToolKey"];
+	        this.Name = source["Name"];
+	        this.LocalVersions = this.convertValues(source["LocalVersions"], ManagedVersion);
+	        this.CurrentDefault = this.convertValues(source["CurrentDefault"], ManagedVersion);
+	        this.ActiveCommand = source["ActiveCommand"];
+	        this.PathConflict = source["PathConflict"];
+	        this.ManagerConflict = this.convertValues(source["ManagerConflict"], VersionManagerConflict);
+	        this.LastInstallPlan = this.convertValues(source["LastInstallPlan"], VersionInstallPlan);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	export class VersionOperationResult {
+	    Success: boolean;
+	    Message: string;
+	    ToolKey: string;
+	    Version: string;
+	    AffectedPaths: string[];
+	    AffectedEnvironment: Record<string, string>;
+	    RollbackAvailable: boolean;
+	    VerificationCommand: string;
+	    VerificationOutput: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new VersionOperationResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Success = source["Success"];
+	        this.Message = source["Message"];
+	        this.ToolKey = source["ToolKey"];
+	        this.Version = source["Version"];
+	        this.AffectedPaths = source["AffectedPaths"];
+	        this.AffectedEnvironment = source["AffectedEnvironment"];
+	        this.RollbackAvailable = source["RollbackAvailable"];
+	        this.VerificationCommand = source["VerificationCommand"];
+	        this.VerificationOutput = source["VerificationOutput"];
+	    }
+	}
+
+}
+

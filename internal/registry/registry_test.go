@@ -834,6 +834,145 @@ func TestSaveToolVersionUpsertReloadsExistingIDAndUpdatesFields(t *testing.T) {
 	}
 }
 
+func TestSyncScannedToolVersionsPreservesExistingManagedFlags(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	installPath := filepath.Join("D:", "production", "go")
+	original := &versionmanager.ManagedVersion{
+		ToolKey:      "go",
+		Version:      "1.25.0",
+		InstallPath:  installPath,
+		BinPath:      filepath.Join(installPath, "bin", "go.exe"),
+		Source:       versionmanager.SourceDevMan,
+		IsDefault:    true,
+		IsActive:     true,
+		CanDelete:    true,
+		DeletePolicy: versionmanager.DeletePolicyDirect,
+		DetectedAt:   time.Now().Add(-time.Hour),
+	}
+	if err := reg.SaveToolVersion(original); err != nil {
+		t.Fatalf("SaveToolVersion failed: %v", err)
+	}
+
+	detectedAt := time.Now()
+	err := reg.SyncScannedToolVersions("go", []versionmanager.ManagedVersion{{
+		ToolKey:      "go",
+		Version:      "go version go1.25.3 windows/amd64",
+		InstallPath:  installPath,
+		BinPath:      filepath.Join(installPath, "bin", "go.exe"),
+		Source:       versionmanager.SourceExternal,
+		IsDefault:    false,
+		IsActive:     false,
+		CanDelete:    false,
+		DeletePolicy: versionmanager.DeletePolicyForceRequired,
+		DetectedAt:   detectedAt,
+	}})
+	if err != nil {
+		t.Fatalf("SyncScannedToolVersions failed: %v", err)
+	}
+
+	versions, err := reg.ListToolVersions("go")
+	if err != nil {
+		t.Fatalf("ListToolVersions failed: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("expected 1 version, got %#v", versions)
+	}
+	got := versions[0]
+	if got.ID != original.ID {
+		t.Fatalf("expected id %d, got %d", original.ID, got.ID)
+	}
+	if got.Source != versionmanager.SourceDevMan || !got.IsDefault || !got.IsActive || !got.CanDelete || got.DeletePolicy != versionmanager.DeletePolicyDirect {
+		t.Fatalf("managed flags were not preserved: %#v", got)
+	}
+	if got.Version != "go version go1.25.3 windows/amd64" {
+		t.Fatalf("expected detected version to refresh version string, got %#v", got)
+	}
+	if !got.DetectedAt.Equal(detectedAt) {
+		t.Fatalf("expected detected_at to update, got %#v", got)
+	}
+}
+
+func TestSyncScannedToolVersionsRemovesStaleExternalRowsButKeepsManagedOnes(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	stalePath := filepath.Join("D:", "stale", "go")
+	stale := &versionmanager.ManagedVersion{
+		ToolKey:      "go",
+		Version:      "go version go1.24.0 windows/amd64",
+		InstallPath:  stalePath,
+		BinPath:      filepath.Join(stalePath, "bin", "go.exe"),
+		Source:       versionmanager.SourceExternal,
+		DeletePolicy: versionmanager.DeletePolicyForceRequired,
+		DetectedAt:   time.Now().Add(-2 * time.Hour),
+	}
+	if err := reg.SaveToolVersion(stale); err != nil {
+		t.Fatalf("SaveToolVersion stale failed: %v", err)
+	}
+
+	managedPath := filepath.Join("D:", "managed", "go1.23.0")
+	managed := &versionmanager.ManagedVersion{
+		ToolKey:      "go",
+		Version:      "1.23.0",
+		InstallPath:  managedPath,
+		BinPath:      filepath.Join(managedPath, "bin", "go.exe"),
+		Source:       versionmanager.SourceDevMan,
+		CanDelete:    true,
+		DeletePolicy: versionmanager.DeletePolicyDirect,
+		DetectedAt:   time.Now().Add(-time.Hour),
+	}
+	if err := reg.SaveToolVersion(managed); err != nil {
+		t.Fatalf("SaveToolVersion managed failed: %v", err)
+	}
+
+	detectedPath := filepath.Join("D:", "toolchains", "go")
+	err := reg.SyncScannedToolVersions("go", []versionmanager.ManagedVersion{{
+		ToolKey:      "go",
+		Version:      "go version go1.25.3 windows/amd64",
+		InstallPath:  detectedPath,
+		BinPath:      filepath.Join(detectedPath, "bin", "go.exe"),
+		Source:       versionmanager.SourceExternal,
+		IsDefault:    true,
+		IsActive:     true,
+		DeletePolicy: versionmanager.DeletePolicyForceRequired,
+		DetectedAt:   time.Now(),
+	}})
+	if err != nil {
+		t.Fatalf("SyncScannedToolVersions failed: %v", err)
+	}
+
+	versions, err := reg.ListToolVersions("go")
+	if err != nil {
+		t.Fatalf("ListToolVersions failed: %v", err)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("expected stale external row removed and managed row preserved, got %#v", versions)
+	}
+
+	var foundDetected, foundManaged bool
+	for _, version := range versions {
+		switch version.InstallPath {
+		case detectedPath:
+			foundDetected = true
+			if version.Source != versionmanager.SourceExternal || version.IsDefault || version.IsActive {
+				t.Fatalf("detected version flags mismatch: %#v", version)
+			}
+		case managedPath:
+			foundManaged = true
+			if version.Source != versionmanager.SourceDevMan {
+				t.Fatalf("managed version should remain untouched: %#v", version)
+			}
+		case stalePath:
+			t.Fatalf("stale external version should have been removed: %#v", version)
+		}
+	}
+	if !foundDetected || !foundManaged {
+		t.Fatalf("expected detected and managed rows, got %#v", versions)
+	}
+}
+
 func TestListToolVersionsToleratesNullableOptionalFields(t *testing.T) {
 	reg, cleanup := setupTestDB(t)
 	defer cleanup()

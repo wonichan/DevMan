@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ScanAll,
   FetchOfficialVersions,
   InstallVersion,
   ListToolVersions,
@@ -14,6 +15,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 import { SurfaceCard } from '../components/ui/SurfaceCard';
 import { RefreshIcon, SearchIcon, TrashIcon, VersionsIcon, WarningIcon } from '../components/icons';
 import { useToast } from '../hooks/useToast';
+import { usePageActions } from '../hooks/usePageActions';
 import type {
   AvailableVersion,
   ManagedVersion,
@@ -91,9 +93,12 @@ export default function Versions() {
     error(failureTitle, result.Message || '后端返回操作失败。');
   };
 
-  const loadData = async () => {
+  const loadData = async (refreshScan = false) => {
     setLoading(true);
     try {
+      if (refreshScan) {
+        await ScanAll();
+      }
       const data = await ListToolVersions();
       const list = Array.isArray(data) ? data : [];
       setTools(list);
@@ -111,6 +116,8 @@ export default function Versions() {
   useEffect(() => {
     loadData();
   }, []);
+
+  usePageActions('versions', { refresh: () => loadData(true) });
 
   const handleSelectTool = (toolKey: string) => {
     setActiveToolKey(toolKey);
@@ -227,7 +234,7 @@ export default function Versions() {
         title="版本管理"
         description="查看本地工具版本，刷新官方版本列表，并执行安装、切换或卸载操作。"
         actions={
-          <Button variant="secondary" onClick={loadData} isLoading={loading}>
+          <Button variant="secondary" onClick={() => loadData(true)} isLoading={loading}>
             <RefreshIcon className="mr-2 h-4 w-4" />
             刷新
           </Button>

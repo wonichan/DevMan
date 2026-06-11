@@ -3,6 +3,7 @@ package scanner
 import (
 	"devman/internal/models"
 	"devman/internal/registry"
+	"devman/internal/versionmanager"
 	"path/filepath"
 	"strings"
 	"time"
@@ -70,13 +71,21 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 			paths = append(paths, customPaths...)
 		}
 
+		env := modelsForScanner(s)
+		if len(instances) > 0 {
+			if toolKey, ok := syncedToolKey(env.Key); ok {
+				if err := e.reg.SyncScannedToolVersions(toolKey, buildScannedToolVersions(toolKey, instances)); err != nil {
+					entry.WithError(err).WithField("tool_key", toolKey).Warn("failed to sync scanned tool versions")
+				}
+			}
+		}
+
 		if len(instances) == 0 {
 			entry.WithField("duration_ms", time.Since(scannerStart).Milliseconds()).Info("scanner completed with no instances")
 			continue
 		}
 
 		// Save env metadata
-		env := modelsForScanner(s)
 		if err := e.reg.SaveEnv(&env); err != nil {
 			entry.WithError(err).WithField("env_key", env.Key).Error("failed to save scanned environment")
 			continue
@@ -220,4 +229,58 @@ func detectCustomPaths(s Scanner, customPaths []string) ([]models.EnvInstance, [
 	}
 
 	return instances, paths
+}
+
+func syncedToolKey(envKey string) (string, bool) {
+	switch strings.TrimSpace(envKey) {
+	case "go", "bun", "flutter":
+		return envKey, true
+	case "nodejs":
+		return "node", true
+	default:
+		return "", false
+	}
+}
+
+func buildScannedToolVersions(toolKey string, instances []models.EnvInstance) []versionmanager.ManagedVersion {
+	versions := make([]versionmanager.ManagedVersion, 0, len(instances))
+	for _, instance := range instances {
+		installPath := strings.TrimSpace(instance.InstallPath)
+		if installPath == "" {
+			continue
+		}
+		versions = append(versions, versionmanager.ManagedVersion{
+			ToolKey:      toolKey,
+			Version:      instance.Version,
+			InstallPath:  installPath,
+			BinPath:      scannedBinPath(toolKey, installPath),
+			Source:       versionmanager.SourceExternal,
+			IsDefault:    instance.IsDefault,
+			IsActive:     instance.IsActive,
+			CanDelete:    false,
+			DeletePolicy: versionmanager.DeletePolicyForceRequired,
+			DetectedAt:   detectedAtForInstance(instance),
+		})
+	}
+	return versions
+}
+
+func scannedBinPath(toolKey string, installPath string) string {
+	tool, ok := versionmanager.ToolByKey(toolKey)
+	if !ok {
+		return ""
+	}
+	targets, err := versionmanager.ShimTargets(toolKey, installPath)
+	if err != nil {
+		return ""
+	}
+	primaryShim := strings.TrimSuffix(tool.PrimaryExe, filepath.Ext(tool.PrimaryExe)) + ".cmd"
+	return targets[primaryShim]
+}
+
+func detectedAtForInstance(instance models.EnvInstance) time.Time {
+	if instance.DetectedAt.IsZero() {
+		return time.Now()
+	}
+	return instance.DetectedAt
 }

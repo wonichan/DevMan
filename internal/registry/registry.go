@@ -636,6 +636,76 @@ func (r *Registry) SaveToolVersion(v *versionmanager.ManagedVersion) error {
 	).Scan(&v.ID)
 }
 
+func (r *Registry) SyncScannedToolVersions(toolKey string, scanned []versionmanager.ManagedVersion) error {
+	existing, err := r.ListToolVersions(toolKey)
+	if err != nil {
+		return err
+	}
+
+	existingByPath := make(map[string]versionmanager.ManagedVersion, len(existing))
+	for _, version := range existing {
+		existingByPath[version.InstallPath] = version
+	}
+
+	hasPinnedState := false
+	for _, version := range existing {
+		if version.Source != versionmanager.SourceExternal || version.IsDefault || version.IsActive {
+			hasPinnedState = true
+			break
+		}
+	}
+
+	detectedPaths := make(map[string]struct{}, len(scanned))
+	for _, detected := range scanned {
+		installPath := strings.TrimSpace(detected.InstallPath)
+		if installPath == "" {
+			continue
+		}
+		detected.InstallPath = installPath
+		if detected.DetectedAt.IsZero() {
+			detected.DetectedAt = time.Now()
+		}
+		detectedPaths[installPath] = struct{}{}
+
+		if current, ok := existingByPath[installPath]; ok {
+			current.Version = detected.Version
+			if strings.TrimSpace(detected.BinPath) != "" {
+				current.BinPath = detected.BinPath
+			}
+			current.DetectedAt = detected.DetectedAt
+			if err := r.SaveToolVersion(&current); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if hasPinnedState {
+			detected.IsDefault = false
+			detected.IsActive = false
+		}
+		if err := r.SaveToolVersion(&detected); err != nil {
+			return err
+		}
+	}
+
+	for _, current := range existing {
+		if current.Source != versionmanager.SourceExternal {
+			continue
+		}
+		if current.IsDefault || current.IsActive {
+			continue
+		}
+		if _, ok := detectedPaths[current.InstallPath]; ok {
+			continue
+		}
+		if err := r.DeleteToolVersion(current.ID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (r *Registry) ListToolVersions(toolKey string) ([]versionmanager.ManagedVersion, error) {
 	rows, err := r.db.Query(`
 		SELECT id, tool_key, version, install_path, COALESCE(bin_path, ''), source,
