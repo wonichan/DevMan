@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"devman/internal/models"
-	"devman/internal/versionmanager"
+	"devman/internal/versionstore"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/sirupsen/logrus"
@@ -653,7 +653,7 @@ func (r *Registry) PruneMetricSnapshots(metricKey string, keepCount int) error {
 	return err
 }
 
-func (r *Registry) SaveToolVersion(v *versionmanager.ManagedVersion) error {
+func (r *Registry) SaveToolVersion(v *versionstore.ManagedVersion) error {
 	if v.DetectedAt.IsZero() {
 		v.DetectedAt = time.Now()
 	}
@@ -682,20 +682,20 @@ func (r *Registry) SaveToolVersion(v *versionmanager.ManagedVersion) error {
 	).Scan(&v.ID)
 }
 
-func (r *Registry) SyncScannedToolVersions(toolKey string, scanned []versionmanager.ManagedVersion) error {
+func (r *Registry) SyncScannedToolVersions(toolKey string, scanned []versionstore.ManagedVersion) error {
 	existing, err := r.ListToolVersions(toolKey)
 	if err != nil {
 		return err
 	}
 
-	existingByPath := make(map[string]versionmanager.ManagedVersion, len(existing))
+	existingByPath := make(map[string]versionstore.ManagedVersion, len(existing))
 	for _, version := range existing {
 		existingByPath[version.InstallPath] = version
 	}
 
 	hasPinnedState := false
 	for _, version := range existing {
-		if version.Source != versionmanager.SourceExternal || version.IsDefault || version.IsActive {
+		if version.Source != versionstore.SourceExternal || version.IsDefault || version.IsActive {
 			hasPinnedState = true
 			break
 		}
@@ -735,7 +735,7 @@ func (r *Registry) SyncScannedToolVersions(toolKey string, scanned []versionmana
 	}
 
 	for _, current := range existing {
-		if current.Source != versionmanager.SourceExternal {
+		if current.Source != versionstore.SourceExternal {
 			continue
 		}
 		if current.IsDefault || current.IsActive {
@@ -752,7 +752,7 @@ func (r *Registry) SyncScannedToolVersions(toolKey string, scanned []versionmana
 	return nil
 }
 
-func (r *Registry) ListToolVersions(toolKey string) ([]versionmanager.ManagedVersion, error) {
+func (r *Registry) ListToolVersions(toolKey string) ([]versionstore.ManagedVersion, error) {
 	rows, err := r.db.Query(`
 		SELECT id, tool_key, version, install_path, COALESCE(bin_path, ''), source,
 		       is_default, is_active, can_delete, COALESCE(delete_policy, ''), detected_at
@@ -765,19 +765,19 @@ func (r *Registry) ListToolVersions(toolKey string) ([]versionmanager.ManagedVer
 	}
 	defer rows.Close()
 
-	var versions []versionmanager.ManagedVersion
+	var versions []versionstore.ManagedVersion
 	for rows.Next() {
-		var v versionmanager.ManagedVersion
+		var v versionstore.ManagedVersion
 		var isDefault, isActive, canDelete int
 		var source, deletePolicy string
 		if err := rows.Scan(&v.ID, &v.ToolKey, &v.Version, &v.InstallPath, &v.BinPath, &source, &isDefault, &isActive, &canDelete, &deletePolicy, &v.DetectedAt); err != nil {
 			return nil, err
 		}
-		v.Source = versionmanager.VersionSource(source)
+		v.Source = versionstore.VersionSource(source)
 		v.IsDefault = isDefault != 0
 		v.IsActive = isActive != 0
 		v.CanDelete = canDelete != 0
-		v.DeletePolicy = versionmanager.DeletePolicy(deletePolicy)
+		v.DeletePolicy = versionstore.DeletePolicy(deletePolicy)
 		versions = append(versions, v)
 	}
 	return versions, rows.Err()
@@ -788,7 +788,7 @@ func (r *Registry) DeleteToolVersion(id int64) error {
 	return err
 }
 
-func (r *Registry) SaveInstallStrategy(strategy versionmanager.InstallStrategy) error {
+func (r *Registry) SaveInstallStrategy(strategy versionstore.InstallStrategy) error {
 	if strategy.UpdatedAt.IsZero() {
 		strategy.UpdatedAt = time.Now()
 	}
@@ -803,13 +803,13 @@ func (r *Registry) SaveInstallStrategy(strategy versionmanager.InstallStrategy) 
 	return err
 }
 
-func (r *Registry) GetInstallStrategy(toolKey string) (*versionmanager.InstallStrategy, error) {
+func (r *Registry) GetInstallStrategy(toolKey string) (*versionstore.InstallStrategy, error) {
 	row := r.db.QueryRow(`
 		SELECT tool_key, root_dir, COALESCE(reason, ''), updated_at
 		FROM version_install_strategies
 		WHERE tool_key = ?
 	`, toolKey)
-	var strategy versionmanager.InstallStrategy
+	var strategy versionstore.InstallStrategy
 	if err := row.Scan(&strategy.ToolKey, &strategy.RootDir, &strategy.Reason, &strategy.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil

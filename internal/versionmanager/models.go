@@ -1,22 +1,25 @@
 package versionmanager
 
-import "time"
-
-type VersionSource string
-
-const (
-	SourceDevMan         VersionSource = "devman"
-	SourceExternal       VersionSource = "external"
-	SourceVersionManager VersionSource = "version_manager"
+import (
+	"devman/internal/versionstore"
+	"time"
 )
 
-type DeletePolicy string
+type VersionSource = versionstore.VersionSource
 
 const (
-	DeletePolicyDirect        DeletePolicy = "direct"
-	DeletePolicyRemoveOnly    DeletePolicy = "remove_tracking"
-	DeletePolicyForceRequired DeletePolicy = "force_required"
-	DeletePolicyBlocked       DeletePolicy = "blocked"
+	SourceDevMan         = versionstore.SourceDevMan
+	SourceExternal       = versionstore.SourceExternal
+	SourceVersionManager = versionstore.SourceVersionManager
+)
+
+type DeletePolicy = versionstore.DeletePolicy
+
+const (
+	DeletePolicyDirect        = versionstore.DeletePolicyDirect
+	DeletePolicyRemoveOnly    = versionstore.DeletePolicyRemoveOnly
+	DeletePolicyForceRequired = versionstore.DeletePolicyForceRequired
+	DeletePolicyBlocked       = versionstore.DeletePolicyBlocked
 )
 
 type ToolVersionCatalog struct {
@@ -35,26 +38,9 @@ type AvailableVersion struct {
 	Checksum    string    `json:"Checksum"`
 }
 
-type ManagedVersion struct {
-	ID           int64         `json:"Id"`
-	ToolKey      string        `json:"ToolKey"`
-	Version      string        `json:"Version"`
-	InstallPath  string        `json:"InstallPath"`
-	BinPath      string        `json:"BinPath"`
-	Source       VersionSource `json:"Source"`
-	IsDefault    bool          `json:"IsDefault"`
-	IsActive     bool          `json:"IsActive"`
-	CanDelete    bool          `json:"CanDelete"`
-	DeletePolicy DeletePolicy  `json:"DeletePolicy"`
-	DetectedAt   time.Time     `json:"DetectedAt"`
-}
+type ManagedVersion = versionstore.ManagedVersion
 
-type InstallStrategy struct {
-	ToolKey   string    `json:"ToolKey"`
-	RootDir   string    `json:"RootDir"`
-	Reason    string    `json:"Reason"`
-	UpdatedAt time.Time `json:"UpdatedAt"`
-}
+type InstallStrategy = versionstore.InstallStrategy
 
 type VersionInstallPlan struct {
 	ToolKey            string            `json:"ToolKey"`

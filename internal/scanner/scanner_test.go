@@ -335,23 +335,23 @@ func TestScanAllPreservesEnvWhenScannerFails(t *testing.T) {
 	}
 }
 
-func TestSyncedToolKeyMapsSupportedScannerKeys(t *testing.T) {
+func TestScannerDescriptorsMapSyncedToolKeys(t *testing.T) {
 	tests := []struct {
-		envKey   string
-		wantKey  string
-		wantOkay bool
+		name    string
+		scanner Scanner
+		wantKey string
 	}{
-		{envKey: "go", wantKey: "go", wantOkay: true},
-		{envKey: "nodejs", wantKey: "node", wantOkay: true},
-		{envKey: "bun", wantKey: "bun", wantOkay: true},
-		{envKey: "flutter", wantKey: "flutter", wantOkay: true},
-		{envKey: "python", wantKey: "", wantOkay: false},
+		{name: "go", scanner: &GoScanner{}, wantKey: "go"},
+		{name: "node", scanner: &NodeScanner{}, wantKey: "node"},
+		{name: "bun", scanner: &BunScanner{}, wantKey: "bun"},
+		{name: "flutter", scanner: &FlutterScanner{}, wantKey: "flutter"},
+		{name: "python", scanner: &PythonScanner{}, wantKey: ""},
 	}
 
 	for _, tt := range tests {
-		gotKey, gotOkay := syncedToolKey(tt.envKey)
-		if gotKey != tt.wantKey || gotOkay != tt.wantOkay {
-			t.Fatalf("syncedToolKey(%q) = (%q, %t), want (%q, %t)", tt.envKey, gotKey, gotOkay, tt.wantKey, tt.wantOkay)
+		desc := descriptorForScanner(tt.scanner)
+		if desc.SyncedToolKey != tt.wantKey {
+			t.Fatalf("%s SyncedToolKey = %q, want %q", tt.name, desc.SyncedToolKey, tt.wantKey)
 		}
 	}
 }

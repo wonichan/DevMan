@@ -1,0 +1,13 @@
+[
+  {
+    "date": "2026-06-11",
+    "mode": "Health Dashboard",
+    "score": 93,
+    "findings": {
+      "critical": 0,
+      "warning": 4,
+      "suggestion": 0
+    },
+    "scope": "backend Go code"
+  }
+]

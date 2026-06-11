@@ -61,7 +61,8 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 		scannerStart := time.Now()
 		entry := logrus.WithField("scanner", s.Name())
 		entry.Info("scanner started")
-		env := modelsForScanner(s)
+		desc := descriptorForScanner(s)
+		env := desc.Env
 		instances, paths, err := s.Detect()
 		if err != nil {
 			entry.WithError(err).Error("scanner failed")
@@ -70,16 +71,14 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 		scannerEnvKeys[env.Key] = struct{}{}
 
 		if len(opts.CustomScanPaths) > 0 {
-			customInst, customPaths := detectCustomPaths(s, opts.CustomScanPaths)
+			customInst, customPaths := detectCustomPaths(desc, opts.CustomScanPaths)
 			instances = append(instances, customInst...)
 			paths = append(paths, customPaths...)
 		}
 
-		if len(instances) > 0 {
-			if toolKey, ok := syncedToolKey(env.Key); ok {
-				if err := e.reg.SyncScannedToolVersions(toolKey, buildScannedToolVersions(toolKey, instances)); err != nil {
-					entry.WithError(err).WithField("tool_key", toolKey).Warn("failed to sync scanned tool versions")
-				}
+		if len(instances) > 0 && desc.SyncedToolKey != "" {
+			if err := e.reg.SyncScannedToolVersions(desc.SyncedToolKey, buildScannedToolVersions(desc.SyncedToolKey, instances)); err != nil {
+				entry.WithError(err).WithField("tool_key", desc.SyncedToolKey).Warn("failed to sync scanned tool versions")
 			}
 		}
 
@@ -171,48 +170,11 @@ func (e *Engine) pruneStaleEnvs(scannerEnvKeys, detectedKeys map[string]struct{}
 	}
 }
 
-func modelsForScanner(s Scanner) models.Env {
-	switch s.(type) {
-	case *NodeScanner:
-		return models.Env{Name: "Node.js", Key: "nodejs", Category: models.CategoryRuntime, Icon: "⚡", Description: "JavaScript runtime", Website: "https://nodejs.org"}
-	case *PythonScanner:
-		return models.Env{Name: "Python", Key: "python", Category: models.CategoryRuntime, Icon: "🐍", Description: "Python interpreter", Website: "https://python.org"}
-	case *JavaScanner:
-		return models.Env{Name: "Java", Key: "java", Category: models.CategoryRuntime, Icon: "☕", Description: "Java Development Kit", Website: "https://openjdk.org"}
-	case *GoScanner:
-		return models.Env{Name: "Go", Key: "go", Category: models.CategoryRuntime, Icon: "🦀", Description: "Go programming language", Website: "https://go.dev"}
-	case *FlutterScanner:
-		return models.Env{Name: "Flutter", Key: "flutter", Category: models.CategorySDK, Icon: "🎯", Description: "Flutter SDK", Website: "https://flutter.dev"}
-	case *RustScanner:
-		return models.Env{Name: "Rust", Key: "rust", Category: models.CategoryRuntime, Icon: "🦾", Description: "Rust toolchain", Website: "https://rust-lang.org"}
-	case *DockerScanner:
-		return models.Env{Name: "Docker", Key: "docker", Category: models.CategoryTool, Icon: "🐳", Description: "Container runtime", Website: "https://docker.com"}
-	case *PnpmScanner:
-		return models.Env{Name: "pnpm", Key: "pnpm", Category: models.CategoryTool, Icon: "📦", Description: "Fast, disk space efficient package manager", Website: "https://pnpm.io"}
-	case *YarnScanner:
-		return models.Env{Name: "Yarn", Key: "yarn", Category: models.CategoryTool, Icon: "🧶", Description: "Yarn package manager", Website: "https://yarnpkg.com"}
-	case *BunScanner:
-		return models.Env{Name: "Bun", Key: "bun", Category: models.CategoryRuntime, Icon: "🥟", Description: "Bun JavaScript runtime", Website: "https://bun.sh"}
-	default:
-		return models.Env{Name: s.Name(), Key: s.Name(), Category: models.CategoryTool}
-	}
-}
-
-func detectCustomPaths(s Scanner, customPaths []string) ([]models.EnvInstance, []models.EnvPath) {
+func detectCustomPaths(desc ScannerDescriptor, customPaths []string) ([]models.EnvInstance, []models.EnvPath) {
 	var instances []models.EnvInstance
 	var paths []models.EnvPath
 
-	var exeNames []string
-	switch s.(type) {
-	case *NodeScanner:
-		exeNames = []string{"node", "node.exe"}
-	case *PythonScanner:
-		exeNames = []string{"python", "python3", "python.exe", "py"}
-	case *JavaScanner:
-		exeNames = []string{"java", "java.exe"}
-	case *GoScanner:
-		exeNames = []string{"go", "go.exe"}
-	default:
+	if len(desc.CustomExeNames) == 0 {
 		return instances, paths
 	}
 
@@ -222,7 +184,7 @@ func detectCustomPaths(s Scanner, customPaths []string) ([]models.EnvInstance, [
 			continue
 		}
 		fullPath := filepath.Join(cp, "bin")
-		for _, name := range exeNames {
+		for _, name := range desc.CustomExeNames {
 			candidate := filepath.Join(fullPath, name)
 			if PathExists(candidate) {
 				instances = append(instances, models.EnvInstance{
@@ -259,17 +221,6 @@ func detectCustomPaths(s Scanner, customPaths []string) ([]models.EnvInstance, [
 	}
 
 	return instances, paths
-}
-
-func syncedToolKey(envKey string) (string, bool) {
-	switch strings.TrimSpace(envKey) {
-	case "go", "bun", "flutter":
-		return envKey, true
-	case "nodejs":
-		return "node", true
-	default:
-		return "", false
-	}
 }
 
 func buildScannedToolVersions(toolKey string, instances []models.EnvInstance) []versionmanager.ManagedVersion {
