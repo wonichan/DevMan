@@ -46,21 +46,11 @@ func ensureUserPathEntry(entry string) error {
 		return err
 	}
 
-	parts := splitPathEntries(current)
-	for _, part := range parts {
-		if strings.EqualFold(strings.TrimSpace(part), entry) {
-			return nil
-		}
-	}
-
-	if strings.TrimSpace(current) == "" {
-		if err := envKey.SetExpandStringValue("Path", entry); err != nil {
-			return err
-		}
-		broadcastEnvironmentChange()
+	next, changed := prioritizePathEntry(current, entry)
+	if !changed {
 		return nil
 	}
-	if err := envKey.SetExpandStringValue("Path", entry+";"+current); err != nil {
+	if err := envKey.SetExpandStringValue("Path", next); err != nil {
 		return err
 	}
 	broadcastEnvironmentChange()
@@ -72,6 +62,42 @@ func splitPathEntries(value string) []string {
 		return nil
 	}
 	return strings.Split(value, ";")
+}
+
+func prioritizePathEntry(current string, entry string) (string, bool) {
+	entry = strings.TrimSpace(entry)
+	if entry == "" {
+		return current, false
+	}
+
+	parts := splitPathEntries(current)
+	kept := make([]string, 0, len(parts))
+	found := false
+	firstNonEmpty := ""
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		if firstNonEmpty == "" {
+			firstNonEmpty = trimmed
+		}
+		if strings.EqualFold(trimmed, entry) {
+			found = true
+			continue
+		}
+		kept = append(kept, trimmed)
+	}
+
+	if found && strings.EqualFold(firstNonEmpty, entry) {
+		return current, false
+	}
+
+	next := entry
+	if len(kept) > 0 {
+		next += ";" + strings.Join(kept, ";")
+	}
+	return next, true
 }
 
 func broadcastEnvironmentChange() {

@@ -1,6 +1,9 @@
 package versionmanager
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestSwitchVersionWritesShimsAndEnvironment(t *testing.T) {
 	env := newFakeEnvironment()
@@ -63,6 +66,63 @@ func TestSwitchVersionWritesShimsAndEnvironment(t *testing.T) {
 	}
 	if result.AffectedEnvironment["DEVMAN_HOME"] != env.exeDir {
 		t.Fatalf("AffectedEnvironment DEVMAN_HOME = %q", result.AffectedEnvironment["DEVMAN_HOME"])
+	}
+}
+
+func TestSwitchVersionUsesSharedShimPathForEverySupportedTool(t *testing.T) {
+	for _, tool := range SupportedTools() {
+		t.Run(tool.Key, func(t *testing.T) {
+			env := newFakeEnvironment()
+			env.exeDir = `D:\apps\DevMan`
+			installPath := `D:\production\` + tool.Key + `-2.0.0`
+			targets, err := ShimTargets(tool.Key, installPath)
+			if err != nil {
+				t.Fatalf("ShimTargets failed: %v", err)
+			}
+			primaryTarget, ok := primaryShimTarget(tool, targets)
+			if !ok {
+				t.Fatalf("primary shim target not found for %s", tool.Key)
+			}
+			env.files[primaryTarget] = true
+			env.runOutput = "selected"
+
+			result, err := NewService(nil, env).SwitchVersion(ManagedVersion{
+				ID:          42,
+				ToolKey:     tool.Key,
+				Version:     "2.0.0",
+				InstallPath: installPath,
+			})
+			if err != nil {
+				t.Fatalf("SwitchVersion failed: %v", err)
+			}
+
+			if env.vars[tool.EnvVar] != installPath {
+				t.Fatalf("%s = %q, want %q", tool.EnvVar, env.vars[tool.EnvVar], installPath)
+			}
+			if env.vars["DEVMAN_HOME"] != env.exeDir {
+				t.Fatalf("DEVMAN_HOME = %q", env.vars["DEVMAN_HOME"])
+			}
+			if len(env.userPathEntries) != 1 || env.userPathEntries[0] != `%DEVMAN_HOME%\shims` {
+				t.Fatalf("user path entries = %#v", env.userPathEntries)
+			}
+
+			for shimName, target := range targets {
+				shimPath := filepath.Join(env.exeDir, "shims", shimName)
+				expectedShim, err := GenerateShim(target)
+				if err != nil {
+					t.Fatalf("GenerateShim failed: %v", err)
+				}
+				if string(env.writes[shimPath]) != expectedShim {
+					t.Fatalf("shim %s content = %q", shimName, string(env.writes[shimPath]))
+				}
+			}
+			if result.AffectedEnvironment[tool.EnvVar] != installPath {
+				t.Fatalf("AffectedEnvironment %s = %q", tool.EnvVar, result.AffectedEnvironment[tool.EnvVar])
+			}
+			if result.AffectedEnvironment["Path"] != `%DEVMAN_HOME%\shims` {
+				t.Fatalf("AffectedEnvironment Path = %q", result.AffectedEnvironment["Path"])
+			}
+		})
 	}
 }
 
