@@ -281,6 +281,98 @@ func TestInstancesAndPaths(t *testing.T) {
 	}
 }
 
+func TestDeleteEnvCascadesInstancesAndPaths(t *testing.T) {
+	reg, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	env := &models.Env{Name: "Flutter", Key: "flutter", Category: models.CategorySDK}
+	if err := reg.SaveEnv(env); err != nil {
+		t.Fatalf("save env failed: %v", err)
+	}
+	if err := reg.SaveInstance(&models.EnvInstance{
+		EnvID:       env.ID,
+		Version:     "3.19.0",
+		InstallPath: `C:\Tools\flutter`,
+		IsActive:    true,
+	}); err != nil {
+		t.Fatalf("save instance failed: %v", err)
+	}
+	if err := reg.SavePath(&models.EnvPath{
+		EnvID:     env.ID,
+		Type:      models.PathInstall,
+		Path:      `C:\Tools\flutter`,
+		SizeBytes: 10,
+		IsMovable: true,
+	}); err != nil {
+		t.Fatalf("save path failed: %v", err)
+	}
+
+	keep := &models.Env{Name: "Go", Key: "go", Category: models.CategoryRuntime}
+	if err := reg.SaveEnv(keep); err != nil {
+		t.Fatalf("save keep env failed: %v", err)
+	}
+	if err := reg.SaveInstance(&models.EnvInstance{
+		EnvID:       keep.ID,
+		Version:     "1.25.0",
+		InstallPath: `C:\Go`,
+		IsActive:    true,
+	}); err != nil {
+		t.Fatalf("save keep instance failed: %v", err)
+	}
+
+	if err := reg.DeleteEnv("flutter"); err != nil {
+		t.Fatalf("DeleteEnv failed: %v", err)
+	}
+
+	got, err := reg.GetEnvByKey("flutter")
+	if err != nil {
+		t.Fatalf("get env failed: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected env removed, got %#v", got)
+	}
+	instances, err := reg.ListInstances(env.ID)
+	if err != nil {
+		t.Fatalf("list instances failed: %v", err)
+	}
+	if len(instances) != 0 {
+		t.Fatalf("expected instances cascaded, got %#v", instances)
+	}
+	paths, err := reg.ListPaths(env.ID)
+	if err != nil {
+		t.Fatalf("list paths failed: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("expected paths cascaded, got %#v", paths)
+	}
+
+	other, err := reg.GetEnvByKey("go")
+	if err != nil {
+		t.Fatalf("get other env failed: %v", err)
+	}
+	if other == nil {
+		t.Fatal("unrelated env must not be deleted")
+	}
+	otherInstances, err := reg.ListInstances(keep.ID)
+	if err != nil {
+		t.Fatalf("list other instances failed: %v", err)
+	}
+	if len(otherInstances) != 1 {
+		t.Fatalf("expected unrelated instance preserved, got %#v", otherInstances)
+	}
+
+	// Idempotent: deleting again or deleting unknown/empty keys must be safe.
+	if err := reg.DeleteEnv("flutter"); err != nil {
+		t.Fatalf("DeleteEnv on missing key should be idempotent, got %v", err)
+	}
+	if err := reg.DeleteEnv("never-existed"); err != nil {
+		t.Fatalf("DeleteEnv on unknown key should be idempotent, got %v", err)
+	}
+	if err := reg.DeleteEnv(""); err != nil {
+		t.Fatalf("DeleteEnv on empty key should be idempotent, got %v", err)
+	}
+}
+
 func TestHistory(t *testing.T) {
 	reg, cleanup := setupTestDB(t)
 	defer cleanup()

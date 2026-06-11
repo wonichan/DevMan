@@ -346,6 +346,52 @@ func (r *Registry) ClearInstances(envID int64) error {
 	return err
 }
 
+// DeleteEnv removes the env row identified by key along with its dependent
+// env_instances and env_paths in a single transaction. It is idempotent: when
+// no row matches the key (already deleted, never persisted, or empty key), it
+// returns nil without modifying the database. History, metric snapshots, and
+// tool_versions are intentionally untouched.
+func (r *Registry) DeleteEnv(key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		logrus.WithError(err).WithField("env_key", key).Error("failed to begin env deletion transaction")
+		return err
+	}
+	defer tx.Rollback()
+
+	var envID int64
+	if err := tx.QueryRow(`SELECT id FROM envs WHERE key = ?`, key).Scan(&envID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		logrus.WithError(err).WithField("env_key", key).Error("failed to look up env for deletion")
+		return err
+	}
+
+	if _, err := tx.Exec(`DELETE FROM env_instances WHERE env_id = ?`, envID); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"env_key": key, "env_id": envID}).Error("failed to delete env instances")
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM env_paths WHERE env_id = ?`, envID); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"env_key": key, "env_id": envID}).Error("failed to delete env paths")
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM envs WHERE id = ?`, envID); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"env_key": key, "env_id": envID}).Error("failed to delete env row")
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{"env_key": key, "env_id": envID}).Error("failed to commit env deletion")
+		return err
+	}
+	return nil
+}
+
 func (r *Registry) ListInstances(envID int64) ([]models.EnvInstance, error) {
 	rows, err := r.db.Query(`SELECT id, env_id, version, install_path, is_default, is_active, source, detected_at FROM env_instances WHERE env_id = ?`, envID)
 	if err != nil {

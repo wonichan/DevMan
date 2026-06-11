@@ -55,15 +55,19 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 	start := time.Now()
 	logrus.WithFields(logrus.Fields{"scanner_count": len(e.scanners), "custom_scan_paths": len(opts.CustomScanPaths)}).Info("environment scan started")
 	var summaries []models.EnvSummary
+	scannerEnvKeys := make(map[string]struct{}, len(e.scanners))
+	detectedKeys := make(map[string]struct{}, len(e.scanners))
 	for _, s := range e.scanners {
 		scannerStart := time.Now()
 		entry := logrus.WithField("scanner", s.Name())
 		entry.Info("scanner started")
+		env := modelsForScanner(s)
 		instances, paths, err := s.Detect()
 		if err != nil {
 			entry.WithError(err).Error("scanner failed")
 			continue
 		}
+		scannerEnvKeys[env.Key] = struct{}{}
 
 		if len(opts.CustomScanPaths) > 0 {
 			customInst, customPaths := detectCustomPaths(s, opts.CustomScanPaths)
@@ -71,7 +75,6 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 			paths = append(paths, customPaths...)
 		}
 
-		env := modelsForScanner(s)
 		if len(instances) > 0 {
 			if toolKey, ok := syncedToolKey(env.Key); ok {
 				if err := e.reg.SyncScannedToolVersions(toolKey, buildScannedToolVersions(toolKey, instances)); err != nil {
@@ -84,6 +87,7 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 			entry.WithField("duration_ms", time.Since(scannerStart).Milliseconds()).Info("scanner completed with no instances")
 			continue
 		}
+		detectedKeys[env.Key] = struct{}{}
 
 		// Save env metadata
 		if err := e.reg.SaveEnv(&env); err != nil {
@@ -137,8 +141,34 @@ func (e *Engine) ScanAllWithOptions(opts ScanOptions) ([]models.EnvSummary, erro
 		})
 		entry.WithFields(logrus.Fields{"instances": len(instances), "paths": len(paths), "total_size": totalSize, "duration_ms": time.Since(scannerStart).Milliseconds()}).Info("scanner completed")
 	}
+	e.pruneStaleEnvs(scannerEnvKeys, detectedKeys)
 	logrus.WithFields(logrus.Fields{"summary_count": len(summaries), "duration_ms": time.Since(start).Milliseconds()}).Info("environment scan completed")
 	return summaries, nil
+}
+
+func (e *Engine) pruneStaleEnvs(scannerEnvKeys, detectedKeys map[string]struct{}) {
+	for key := range scannerEnvKeys {
+		if _, detected := detectedKeys[key]; detected {
+			continue
+		}
+		existing, err := e.reg.GetEnvByKey(key)
+		if err != nil {
+			logrus.WithError(err).WithField("env_key", key).Warn("failed to look up env for stale cleanup")
+			continue
+		}
+		if existing == nil {
+			continue
+		}
+		if existing.IsManaged {
+			logrus.WithField("env_key", key).Debug("preserving managed env without current detection")
+			continue
+		}
+		if err := e.reg.DeleteEnv(key); err != nil {
+			logrus.WithError(err).WithField("env_key", key).Warn("failed to delete stale unmanaged env")
+			continue
+		}
+		logrus.WithField("env_key", key).Info("removed stale unmanaged env not detected by current scan")
+	}
 }
 
 func modelsForScanner(s Scanner) models.Env {

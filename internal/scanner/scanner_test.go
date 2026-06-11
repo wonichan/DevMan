@@ -4,6 +4,7 @@ import (
 	"devman/internal/models"
 	"devman/internal/registry"
 	"devman/internal/versionmanager"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -12,6 +13,7 @@ type fakeScanner struct {
 	name      string
 	instances []models.EnvInstance
 	paths     []models.EnvPath
+	err       error
 }
 
 func (s fakeScanner) Name() string {
@@ -19,6 +21,9 @@ func (s fakeScanner) Name() string {
 }
 
 func (s fakeScanner) Detect() ([]models.EnvInstance, []models.EnvPath, error) {
+	if s.err != nil {
+		return nil, nil, s.err
+	}
 	if s.instances != nil || s.paths != nil {
 		return s.instances, s.paths, nil
 	}
@@ -177,6 +182,156 @@ func TestScanAllPreservesExistingManagedToolVersionStateDuringSync(t *testing.T)
 	}
 	if got.Version != "go version go1.25.3 windows/amd64" {
 		t.Fatalf("expected detected version refresh, got %#v", got)
+	}
+}
+
+func TestScanAllRemovesStaleUnmanagedEnvWhenScannerReportsNone(t *testing.T) {
+	reg, cleanup := setupScannerRegistry(t)
+	defer cleanup()
+
+	stale := &models.Env{Name: "Flutter", Key: "flutter", Category: models.CategorySDK}
+	if err := reg.SaveEnv(stale); err != nil {
+		t.Fatalf("save stale env failed: %v", err)
+	}
+	if err := reg.SaveInstance(&models.EnvInstance{
+		EnvID:       stale.ID,
+		Version:     "3.19.0",
+		InstallPath: filepath.Join("C:", "Tools", "flutter"),
+		IsActive:    true,
+		Source:      "system",
+	}); err != nil {
+		t.Fatalf("save stale instance failed: %v", err)
+	}
+	if err := reg.SavePath(&models.EnvPath{
+		EnvID:     stale.ID,
+		Type:      models.PathInstall,
+		Path:      filepath.Join("C:", "Tools", "flutter"),
+		SizeBytes: 1,
+		IsMovable: true,
+	}); err != nil {
+		t.Fatalf("save stale path failed: %v", err)
+	}
+
+	engine := &Engine{reg: reg, scanners: []Scanner{fakeScanner{
+		name:      "flutter",
+		instances: []models.EnvInstance{},
+		paths:     []models.EnvPath{},
+	}}}
+
+	if _, err := engine.ScanAll(); err != nil {
+		t.Fatalf("scan all failed: %v", err)
+	}
+
+	got, err := reg.GetEnvByKey("flutter")
+	if err != nil {
+		t.Fatalf("get env failed: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected stale unmanaged flutter env to be removed, got %#v", got)
+	}
+
+	instances, err := reg.ListInstances(stale.ID)
+	if err != nil {
+		t.Fatalf("list instances failed: %v", err)
+	}
+	if len(instances) != 0 {
+		t.Fatalf("expected stale instances to be removed, got %#v", instances)
+	}
+	paths, err := reg.ListPaths(stale.ID)
+	if err != nil {
+		t.Fatalf("list paths failed: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("expected stale paths to be removed, got %#v", paths)
+	}
+}
+
+func TestScanAllPreservesStaleManagedEnvWhenScannerReportsNone(t *testing.T) {
+	reg, cleanup := setupScannerRegistry(t)
+	defer cleanup()
+
+	managed := &models.Env{Name: "Flutter", Key: "flutter", Category: models.CategorySDK}
+	if err := reg.SaveEnv(managed); err != nil {
+		t.Fatalf("save managed env failed: %v", err)
+	}
+	if _, err := reg.SetEnvManaged("flutter", true); err != nil {
+		t.Fatalf("set env managed failed: %v", err)
+	}
+
+	engine := &Engine{reg: reg, scanners: []Scanner{fakeScanner{
+		name:      "flutter",
+		instances: []models.EnvInstance{},
+		paths:     []models.EnvPath{},
+	}}}
+
+	if _, err := engine.ScanAll(); err != nil {
+		t.Fatalf("scan all failed: %v", err)
+	}
+
+	got, err := reg.GetEnvByKey("flutter")
+	if err != nil {
+		t.Fatalf("get env failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected managed flutter env to be preserved when scanner detects none")
+	}
+	if !got.IsManaged {
+		t.Fatal("managed flutter env should remain managed after scan")
+	}
+}
+
+func TestScanAllDoesNotTouchEnvsOutsideScannerSetWhenScannerReportsNone(t *testing.T) {
+	reg, cleanup := setupScannerRegistry(t)
+	defer cleanup()
+
+	unrelated := &models.Env{Name: "Node.js", Key: "nodejs", Category: models.CategoryRuntime}
+	if err := reg.SaveEnv(unrelated); err != nil {
+		t.Fatalf("save unrelated env failed: %v", err)
+	}
+
+	engine := &Engine{reg: reg, scanners: []Scanner{fakeScanner{
+		name:      "flutter",
+		instances: []models.EnvInstance{},
+		paths:     []models.EnvPath{},
+	}}}
+
+	if _, err := engine.ScanAll(); err != nil {
+		t.Fatalf("scan all failed: %v", err)
+	}
+
+	got, err := reg.GetEnvByKey("nodejs")
+	if err != nil {
+		t.Fatalf("get env failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("unrelated env outside scanner set must not be removed")
+	}
+}
+
+func TestScanAllPreservesEnvWhenScannerFails(t *testing.T) {
+	reg, cleanup := setupScannerRegistry(t)
+	defer cleanup()
+
+	existing := &models.Env{Name: "Flutter", Key: "flutter", Category: models.CategorySDK}
+	if err := reg.SaveEnv(existing); err != nil {
+		t.Fatalf("save existing env failed: %v", err)
+	}
+
+	engine := &Engine{reg: reg, scanners: []Scanner{fakeScanner{
+		name: "flutter",
+		err:  errors.New("scanner failed"),
+	}}}
+
+	if _, err := engine.ScanAll(); err != nil {
+		t.Fatalf("scan all failed: %v", err)
+	}
+
+	got, err := reg.GetEnvByKey("flutter")
+	if err != nil {
+		t.Fatalf("get env failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("scanner failure must not delete an existing env")
 	}
 }
 
